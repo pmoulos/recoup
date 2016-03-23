@@ -1,0 +1,78 @@
+CHANGES IN VERSION 0.1.0 (2016-01-18)
+-------------------------------------
+
+NEW FEATURES
+
+    o First release
+
+CHANGES IN VERSION 0.2.0 (2016-01-28)
+-------------------------------------
+
+NEW FEATURES
+
+    o Added a global sampling factor to reduce the size of the total reads and
+    genomic areas for fast overviews.
+    o Coverages and profiles are not recalculated when only ordering (k-means or
+    other) changes.
+    o Exported kmeansDesign and removeData functions.
+    o Added full reusability of the output list object of recoup. Upon a call
+    using this object, only the required elements are recalculated according to
+    the change in input parameters, saving a lot of computation time for simple
+    plotting/profile ordering/binning changes.
+    o Reduced binned coverage calculation time by two
+    o Switched to bigmemory and biganalytics packages to handle coverage profile
+    matrices.
+    o Added sample subsetting when plotting. In this way, profiles are computed
+    once and the user may choose what to plot later.
+    o Added a simple setter and getter for easier manipulation and reusability
+    of recoup objects.
+    
+BUG FIXES
+
+    o Fixed problem with title and curve sizes in some plots
+
+
+CHANGES IN VERSION 0.4.0 (2016-02-02)
+-------------------------------------
+
+NEW FEATURES
+
+    o Removed bigmemory/biganalytics as storage is a trouble.
+    o Added (almost) full reusability of recoup objects. Now the most serious,
+    memory and time consuming calculations need to perform just once.
+    o Added slicing/subsetting or recoup list object.
+    o Broke the code in more collated files.
+    o k-means design function is now much more flexible.
+    
+BUG FIXES
+
+    o Fixed bug with colors in curve profile single-design plots.
+
+
+CHANGES IN VERSION 0.99.2 (2016-03-22)
+-------------------------------------
+
+NEW FEATURES
+
+    o Added plyr import to reduce memory footprints in some averaging 
+    calculations.
+    o Added another plot type which shows correlation between average coverage
+    in summarized genomic regions and respective plot control parameters.
+    o Plotting of confidence intervals for profile (and the newly added 
+    correlation) plots (geom_ribbon) is now an option.
+    o The setter function now supports mulitple argument setting at once.
+    o Object slicing is now also performed on genomic position instead of only
+    reference regions and samples.
+    o Stopped automatic width in heatmaps and passed control to the user through
+    the use of ... and also using ... for plots rendered with ggplot.
+    o Added documentation for recoup_test_data
+    o Added small BAM files for testing of the preprocessRanges()) function.
+    o Updated vignettes.
+    
+BUG FIXES
+    o Fixed bug when reading reads from bed files. GenomeInfoDb is used to fill
+    the seqinfo slot of the produced GenomicRanges. Credits to Orsalia Hazapis,
+    BSRC 'Alexander Fleming'.
+    o Fixed bug when region is "custom" and the intervals were not of fixed 
+    width. Credits to Orsalia Hazapis, BSRC 'Alexander Fleming'.
+    o Fixed bug in custom heatmap ordering.

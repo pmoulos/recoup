@@ -1,0 +1,33 @@
+Package: recoup
+Type: Package
+Title: An R package for the creation of complex genomic profile plots
+Author: Panagiotis Moulos <moulos@fleming.gr>
+Maintainer: Panagiotis Moulos <moulos@fleming.gr>
+Depends: GenomicRanges, GenomicAlignments, ggplot2, ComplexHeatmap
+Imports: BiocGenerics, biomaRt, circlize, rtracklayer, plyr
+Suggests: grid, GenomeInfoDb, Rsamtools, BiocStyle, knitr, rmarkdown,
+        zoo, RUnit, BiocInstaller, BSgenome, RSQLite, RMySQL
+Enhances: parallel
+Description: recoup calculates and plots signal profiles created from
+        short sequence reads derived from Next Generation Sequencing
+        technologies. The profiles provided are either sumarized curve
+        profiles or heatmap profiles. Currently, recoup supports
+        genomic profile plots for reads derived from ChIP-Seq and
+        RNA-Seq experiments. The package uses ggplot2 and
+        ComplexHeatmap graphics facilities for curve and heatmap
+        coverage profiles respectively.
+License: GPL (>= 3)
+Encoding: UTF-8
+LazyLoad: yes
+LazyData: yes
+URL: https://github.com/pmoulos/recoup
+biocViews: Software, GeneExpression, Preprocessing, QualityControl,
+        RNASeq, ChIPSeq, Sequencing, Coverage
+VignetteBuilder: knitr
+Authors@R: c(person(given="Panagiotis", family="Moulos",
+        email="moulos@fleming.gr", role=c("aut", "cre")))
+Version: 0.99.2
+Date: 2016-03-22
+Collate: 'annotation.R' 'argcheck.R' 'coverage.R' 'ranges.R' 'recoup.R'
+        'plot.R' 'profile.R' 'util.R'
+NeedsCompilation: no
