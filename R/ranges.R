@@ -104,6 +104,8 @@ readRanges <- function(input,format,sa,sq,bg,params=NULL) {
         return(readBam(input,sa,sq,params))
     else if (format=="bed")
         return(readBed(input,bg))
+    else if (format=="bigwig")
+        return(NULL)
 }
 
 readBam <- function(bam,sa=c("keep","remove","split"),sq=0.75,params=NULL) {

@@ -36,10 +36,7 @@
             sampleTo = 1e+6,
             spliceAction = c("split", "keep", "remove"),
             spliceRemoveQ = 0.75,
-            bedGenome = ifelse(genome \%in\% c("hg18", "hg19",
-                "hg38", "mm9", "mm10", "rn5", "dm3", 
-                "danrer7", "pantro4", "susscr3"), genome, 
-                NA),
+            bedGenome = NA,
             seed = 42
         ),
         plotParams = list(
@@ -279,8 +276,9 @@
     \item{preprocessParams}{a named list whose members 
     control certain preprocessing steps applied to the 
     \code{\link{GRanges}} objects obtained while or after
-    reading the input BAM/BED files with short reads. The 
-    list has the following fields:
+    reading the input BAM/BED files with short reads or
+    BigWig files with processed signals. The list has the 
+    following fields:
     \itemize{
         \item \code{normalize}: one of \code{"none"}
         (default), \code{"linear", "downsample", 
@@ -395,7 +393,7 @@
         \item \code{ranges}: set to \code{TRUE} (default)
         to store the \code{GRanges} object obtained from 
         the BAM/BED files. Set to \code{FALSE} for not
-        saving.
+        saving. Not applicable when input is of type BigWig.
         \item \code{coverage}: set to \code{TRUE} (default)
         to store the \code{Rle} list object obtained from 
         the coverage calculations. Set to \code{FALSE} for 
@@ -463,7 +461,8 @@
         \item \code{strand}: if set to \code{NULL} (default)
         then reads from both strands are used from the input
         BAM/BED files. If \code{"+"} or \code{"-"}, then
-        only the respective strands are used.
+        only the respective strands are used. Not applicable
+        for input of type BigWig.
         \item \code{ignoreStrand}: \code{TRUE} (default)
         or \code{FALSE}. Passed to the \code{ignore.strand}
         argument in the \code{\link{findOverlaps}} function
@@ -562,11 +561,12 @@
         \item \code{id}: a unique identifier for each 
         sample which should not contain whitespaces
         and preferably no special characters.
-        \item \code{file}: the full path to the BAM or
-        BED file. If the path to the BAM is a hyperlink,
-        the BAM file must be indexed.
-        \item \code{format}: either \code{"bam"} or
-        \code{"bed"}.
+        \item \code{file}: the full path to the BAM, BED
+        of BigWig file. If the path to the BAM is a 
+        hyperlink, the BAM file must be indexed. BigWigs
+        are already indexed.
+        \item \code{format}: one of \code{"bam"}, 
+        \code{"bed"} or \code{"bigwig"}.
     }
     Additionally, each sublist may also contain the 
     following fields:
@@ -736,13 +736,14 @@
     Regarding the usage of the \code{preprocessParams}
     argument, the \code{normalize} field controls how
     the \code{GRanges} representing the reads extracted
-    from BAM/BED files will be normalized. When 
-    \code{"none"}, no normalization is applied and external
-    normalization is assumed. When \code{"linear"}, all
-    the library sizes are divided by the maximum one and
-    a normalization factor is calculated for each sample.
-    The coverage of this sample across the input genomic
-    regions is then multiplied by this factor. When 
+    from BAM/BED files or the signals extracted from BigWig 
+    files will be normalized. When \code{"none"}, no 
+    normalization is applied and external normalization is 
+    assumed. When \code{"linear"}, all the library sizes 
+    are divided by the maximum one and a normalization 
+    factor is calculated for each sample. The coverage 
+    of this sample across the input genomic regions is 
+    then multiplied by this factor. When 
     \code{"downsample"}, all libraries are downsampled to
     the minimum library size among samples. When 
     \code{"sampleto"}, all libraries are downsampled to
@@ -774,7 +775,10 @@
     files is used to splice the longer reads and calculate
     real coverages. This option is not available with
     BED files, however, BED files can contain pre-spliced
-    reads using for example BEDTools for conversion.
+    reads using for example BEDTools for conversion. It
+    should also be noted that in the case of BigWig files,
+    only linear normalization is supported as there is no
+    information on raw reads.
     
     Regarding the \code{heatmapFactor} option of 
     \code{plotParams}, it controls the color scale of the
@@ -820,9 +824,9 @@
     
     Regarding the usage of \code{saveParams} argument, 
     this is useful for several purposes: one is for re-using
-    recoup without re-reading BAM/BED files. If the ranges 
-    are present in the input object to recoup, they are 
-    not re-calculated. If not stored, the memory/storage 
+    recoup without re-reading BAM/BED/BigWig files. If the 
+    ranges are present in the input object to recoup, they 
+    are not re-calculated. If not stored, the memory/storage 
     usage is reduced but the object can be used only for
     simply replotting the profiles using 
     \code{\link{recoupProfile}} and/or 

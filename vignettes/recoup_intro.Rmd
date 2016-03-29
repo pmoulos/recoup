@@ -59,8 +59,9 @@ complex output.
 
 The recoup package comes to fill such gaps by stepping on the shoulders of 
 giants. It uses the now standardized and stable Bioconductor facilities to read
-and import short reads from BAM/BED files and also modern R graphics systems,
-namely [ggplot2](http://ggplot2.org/) and
+and import short reads from BAM/BED files or processed genomic signals from
+BIGWig files and also modern R graphics systems, namely 
+[ggplot2](http://ggplot2.org/) and
 [ComplexHeatmap](https://github.com/jokergoo/ComplexHeatmap) in order to create 
 comprehensive averaged genomic profiles and genomic profile heatmaps. In 
 addition it offers a lot of (easy to use) customization options and automation 

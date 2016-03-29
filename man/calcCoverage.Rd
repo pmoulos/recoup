@@ -8,7 +8,7 @@
 \arguments{
     \item{input}{a \code{GRanges} object or a list of
     \code{GRanges} (not a \code{GRangesList}!) or the
-    path to a BAM file.}
+    path to a BAM or BigWig file.}
 
     \item{mask}{a \code{GRanges} or \code{GRangesList}
     object.}

@@ -49,11 +49,13 @@ BUG FIXES
     o Fixed bug with colors in curve profile single-design plots.
 
 
-CHANGES IN VERSION 0.99.2 (2016-03-22)
+CHANGES IN VERSION 0.99.3 (2016-03-29)
 -------------------------------------
 
 NEW FEATURES
 
+    o Added support for BigWig files which greatly increases coverage reading
+    speed.
     o Added plyr import to reduce memory footprints in some averaging 
     calculations.
     o Added another plot type which shows correlation between average coverage

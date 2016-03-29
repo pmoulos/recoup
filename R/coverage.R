@@ -49,11 +49,17 @@ coverageAreaRef <- function(input,genomeRanges,region,flank,strandedParams,
     
     names(input) <- sapply(input,function(x) return(x$id))
     for (n in names(input)) {
-        theRanges <- splitBySeqname(input[[n]]$ranges,rc=rc)
         message("Calculating ",region," coverage for ",input[[n]]$name)
-        input[[n]]$coverage <- calcCoverage(theRanges,mainRanges,
-            strand=strandedParams$strand,
-            ignore.strand=strandedParams$ignoreStrand,rc=rc)
+        if (!is.null(input[[n]]$ranges)) {
+            theRanges <- splitBySeqname(input[[n]]$ranges,rc=rc)
+            input[[n]]$coverage <- calcCoverage(theRanges,mainRanges,
+                strand=strandedParams$strand,
+                ignore.strand=strandedParams$ignoreStrand,rc=rc)
+        }
+        else 
+            input[[n]]$coverage <- calcCoverage(input[[n]]$file,mainRanges,
+                strand=strandedParams$strand,
+                ignore.strand=strandedParams$ignoreStrand,rc=rc)
         #message(" center...")
         #input[[n]]$coverage$center <- calcCoverage(theRanges,mainRanges,
         #    strand=strandedParams$strand,
@@ -85,7 +91,10 @@ coverageRnaRef <- function(input,genomeRanges,helperRanges,flank,
         rightRanges <- getFlankingRanges(helperRanges,flank[2],"downstream")
     names(input) <- sapply(input,function(x) return(x$id))
     for (n in names(input)) {
-        theRanges <- splitBySeqname(input[[n]]$ranges)
+        if (!is.null(input[[n]]$ranges))
+            theRanges <- splitBySeqname(input[[n]]$ranges)
+        else
+            theRanges <- input[[n]]$file
         message("Calculating genebody coverage for ",input[[n]]$name)
         message(" center...")
         #input[[n]]$coverage$center <- 
@@ -118,25 +127,31 @@ calcCoverage <- function(input,mask,strand=NULL,ignore.strand=TRUE,rc=NULL) {
     if (!is(input,"GRanges") && !is.list(input) && is.character(input)
         && !file.exists(input))
         stop("The input argument must be a GenomicRanges object or a valid ",
-            "BAM file or a list of GenomicRanges")
+            "BAM/BigWig file or a list of GenomicRanges")
     if (!is(mask,"GRanges") && !is(mask,"GRangesList"))
         stop("The mask argument must be a GRanges or GRangesList object")
-    isBam <- FALSE
-    if (is.character(input) && file.exists(input))
-        isBam <- TRUE
-    if (!is.null(strand) && !is.list(strand) && !isBam) {
+    isBam <- isBigWig <- FALSE
+    if (is.character(input) && file.exists(input)) {
+        if (length(grep("\\.bam$",input,ignore.case=TRUE,perl=TRUE))>0)
+            isBam <- TRUE
+        else if (length(grep("\\.(bigwig|bw|wig|bg)$",input,ignore.case=TRUE,
+            perl=TRUE))>0)
+            isBigWig <- TRUE
+    }
+    if (!is.null(strand) && !is.list(strand) && !isBam && !isBigWig) {
         message("Retrieving ",strand," reads...")
         input <- input[strand(input)==strand]
     }
-    if (!is.list(input) && !isBam)
+    if (!is.list(input) && !isBam && !isBigWig)
         input <- splitBySeqname(input)
     index <- 1:length(mask)
     if (isBam)
         cov <- cmclapply(index,coverageFromBam,mask,input,ignore.strand,rc=rc)
+    else if (isBigWig)
+        cov <- cmclapply(index,coverageFromBigWig,mask,input,rc=rc)
     else
         cov <- cmclapply(index,coverageFromRanges,mask,input,ignore.strand,
             rc=rc)
-    names(cov) <- names(mask)
     
     # Failed effort to chunk the reference genomic ranges, takes more time
     #if (length(index)<=1000)
@@ -210,7 +225,8 @@ coverageFromRanges <- function(i,mask,input,ignore.strand) {
         return(NULL)
 }
 
-coverageFromBam <- function(i,mask,input,ignore.strand,pp) {
+coverageFromBam <- function(i,mask,input,ignore.strand,
+    pp=list(spliceAction="keep")) {
     if (is(mask,"GRangesList"))
         x <- mask[[i]]
     else
@@ -276,4 +292,31 @@ coverageFromBam <- function(i,mask,input,ignore.strand,pp) {
     }
     else
         return(NULL)
+}
+
+coverageFromBigWig <- function(i,mask,input) {
+    if (is(mask,"GRangesList"))
+        x <- mask[[i]]
+    else
+        x <- mask[i]
+    chr <- as.character(seqnames(x))[1]
+    bwrle <- import.bw(input,selection=BigWigSelection(x),as="RleList")
+    bwcov <- NULL
+    if (chr %in% names(bwrle)) {
+        bwcov <- tryCatch(
+            bwrle[[chr]][start(x):end(x)],
+            error=function(e) {
+                message("Caught invalid genomic area!")
+                print(mask[i])
+                message("Will return zero coverage")
+                return(NULL)
+            },
+            finally={}
+        )
+        return(bwcov)
+    }
+    else {
+        message(chr,"not found!")
+        return(NULL)
+    }
 }

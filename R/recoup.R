@@ -31,8 +31,9 @@ recoup <- function(
         sampleTo=1e+6,
         spliceAction=c("split","keep","remove"),
         spliceRemoveQ=0.75,
-        bedGenome=ifelse(genome %in% c("hg18","hg19","hg38","mm9","mm10","rn5",
-            "dm3","danrer7","pantro4","susscr3"),genome,NA),
+        #bedGenome=ifelse(genome %in% c("hg18","hg19","hg38","mm9","mm10","rn5",
+        #    "dm3","danrer7","pantro4","susscr3"),genome,NA),
+        bedGenome=NA,
         seed=42
     ),
     #preprocessParams=getDefaultListArgs("preprocessParams"),
@@ -470,7 +471,7 @@ recoup <- function(
     
     # At this point we must apply the fraction parameter if <1. We choose this
     # point in order not to restrict later usage of the read ranges and since it
-    # does not take much time to load into memory
+    # does not take much time to load into memory.
     if (fraction<1) {
         newSize <- round(fraction*length(genomeRanges))
         set.seed(preprocessParams$seed)
@@ -479,10 +480,12 @@ recoup <- function(
         if (type=="rnaseq")
             helperRanges <- helperRanges[refIndex]
         for (i in 1:length(input)) {
-            newSize <- round(fraction*length(input[[i]]$ranges))
-            set.seed(preprocessParams$seed)
-            fracIndex <- sort(sample(length(input[[i]]$ranges),newSize))
-            input[[i]]$ranges <- input[[i]]$ranges[fracIndex]
+            if (!is.null(input[[i]]$ranges)) {
+                newSize <- round(fraction*length(input[[i]]$ranges))
+                set.seed(preprocessParams$seed)
+                fracIndex <- sort(sample(length(input[[i]]$ranges),newSize))
+                input[[i]]$ranges <- input[[i]]$ranges[fracIndex]
+            }
             if (!is.null(input[[i]]$coverage)) {
                 #if (!is.null(input[[i]]$coverage$center)) {
                 #    input[[i]]$coverage$center <- 
@@ -498,7 +501,10 @@ recoup <- function(
 
     # Remove unwanted seqnames from reference ranges
     chrs <- unique(unlist(lapply(input,function(x) {
-        return(as.character(runValue(seqnames(x$ranges))))
+        if (x$format %in% c("bam","bed"))
+            return(as.character(runValue(seqnames(x$ranges))))
+        else if (x$format=="bigwig")
+            return(as.character(seqnames(seqinfo(BigWigFile(x$file)))))
     })))
     if (type=="chipseq") {
         keep <- which(as.character(seqnames(genomeRanges)) %in% chrs)
