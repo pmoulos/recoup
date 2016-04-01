@@ -23,7 +23,6 @@
             flankBinSize = 0,
             regionBinSize = 0,
             sumStat = c("mean", "median"),
-            smooth = TRUE,
             interpolation = c("auto", "spline", "linear", 
                 "neighborhood"),
             forceHeatmapBinning = TRUE,
@@ -48,6 +47,8 @@
             heatmapScale = c("common", "each" ),
             heatmapFactor = 1,
             corrScale = c("normalized", "each"),
+            sumStat = c("mean", "median"),
+            smooth = TRUE,
             corrSmoothPar = ifelse(is.null(design), 0.1, 
                 0.5),
             singleFacet = c("none", "wrap", "grid"),
@@ -227,11 +228,6 @@
         \item \code{sumStat}: the statistic which is used
         to summarize the bin coverage. Can be \code{"mean"}
         (default) or \code{"median"}.
-        \item \code{smooth}: if \code{TRUE} (default), the
-        final curve profiles are smoothed using splines.
-        Set to \code{FALSE} for no smoothing. If the 
-        reference genomic regions are many, the differences
-        are minimal.
         \item \code{interpolation}: the interpolation 
         method to be used for coverage interpolation 
         when the reference regions are of unequal lengths
@@ -346,6 +342,14 @@
         (default) or \code{"each"}. Controls the scale
         display in coverage correlation plots. See Details 
         for further information.
+        \item \code{sumStat}: the statistic which is used
+        to summarize coverage matrices. Can be \code{"mean"}
+        (default) or \code{"median"}.
+        \item \code{smooth}: if \code{TRUE} (default), the
+        final curve profiles are smoothed using splines.
+        Set to \code{FALSE} for no smoothing. If the 
+        reference genomic regions are many, the differences
+        are minimal.
         \item \code{corrSmoothPar}: a numeric value between
         0 and 1 which controls the smoothing of correlation
         plots. Its default value is controlled by the 

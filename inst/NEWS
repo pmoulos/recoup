@@ -49,7 +49,7 @@ BUG FIXES
     o Fixed bug with colors in curve profile single-design plots.
 
 
-CHANGES IN VERSION 0.99.3 (2016-03-29)
+CHANGES IN VERSION 0.99.31 (2016-04-01)
 -------------------------------------
 
 NEW FEATURES
@@ -67,6 +67,9 @@ NEW FEATURES
     reference regions and samples.
     o Stopped automatic width in heatmaps and passed control to the user through
     the use of ... and also using ... for plots rendered with ggplot.
+    o Moved sumStat and smooth options from binParams to plotParams as smoothing
+    should be available for reusing/replotting recoup objects. sumStat remained
+    in binParams to be used for region binning over e.g. gene bodies.
     o Added documentation for recoup_test_data
     o Added small BAM files for testing of the preprocessRanges()) function.
     o Updated vignettes.
@@ -78,3 +81,5 @@ BUG FIXES
     o Fixed bug when region is "custom" and the intervals were not of fixed 
     width. Credits to Orsalia Hazapis, BSRC 'Alexander Fleming'.
     o Fixed bug in custom heatmap ordering.
+    o Fixed bug in calculation of average profiles in recoupCorrelation when
+    using mean/median instead of splines.

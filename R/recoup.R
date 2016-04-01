@@ -18,7 +18,6 @@ recoup <- function(
         flankBinSize=0,
         regionBinSize=0,
         sumStat=c("mean","median"),
-        smooth=TRUE,
         interpolation=c("auto","spline","linear","neighborhood"),
         forceHeatmapBinning=TRUE,
         forcedBinSize=c(50,200)
@@ -46,6 +45,8 @@ recoup <- function(
         heatmapScale=c("common","each"),
         heatmapFactor=1,
         corrScale=c("normalized","each"),
+        sumStat=c("mean","median"),
+        smooth=TRUE,
         corrSmoothPar=ifelse(is.null(design),0.1,0.5),
         singleFacet=c("none","wrap","grid"),
         multiFacet=c("wrap","grid"),

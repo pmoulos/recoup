@@ -94,15 +94,22 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
             flank=recoupObj$callopts$flank,
             customIsBase=recoupObj$callopts$customIsBase
         ),
-        yAxisParams=list(
-            signalScale=recoupObj$callopts$plotParams$signalScale,
-            heatmapScale=recoupObj$callopts$plotParams$heatmapScale,
-            heatmapFactor=recoupObj$callopts$plotParams$heatmapFactor,
-            conf=recoupObj$callopts$plotParams$conf
-        ),
         binParams=recoupObj$callopts$binParams,
+        plotParams=recoupObj$callopts$plotParams,
         ggplotParams=ggplotParams
     )
+    
+    ############################################################################
+    # Failsafe until version stabilization
+    if (is.null(opts$plotParams$sumStat))
+        opts$plotParams$sumStat <- opts$binParams$sumStat
+    if (is.null(opts$plotParams$sumStat)) {
+        if (!is.null(opts$binParams$smooth))
+            opts$plotParams$smooth <- opts$binParams$smooth
+        else
+            opts$plotParams$smooth <- TRUE
+    }
+    ############################################################################
     
     if (is.null(input[[1]]$profile))
         stop("Profile matrix not found in the input object! Are you sure you ",
@@ -165,7 +172,7 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
                 colour=Condition)) + 
             geom_line(size=ggParams$lineSize)
         
-        if (opts$yAxisParams$conf)
+        if (opts$plotParams$conf)
             ggplot.plot <- ggplot.plot +
                 geom_ribbon(aes(x=Position,ymin=ymin,ymax=ymax,colour=Condition,
                     fill=Condition),alpha=0.3,size=0) 
@@ -265,7 +272,7 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
                     colour=Condition)) + 
                 geom_line(size=ggParams$lineSize) 
                 
-            if (opts$yAxisParams$conf)
+            if (opts$plotParams$conf)
                 ggplot.plot <- ggplot.plot +
                     geom_ribbon(aes(x=Position,ymin=ymin,ymax=ymax,
                         colour=Condition,fill=Condition),alpha=0.3,size=0) 
@@ -327,7 +334,7 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
                     levels=unique(as.character(faceter[,3])))
             }
             
-            if (opts$yAxisParams$conf) {
+            if (opts$plotParams$conf) {
                 if (ggParams$singleFacet=="none")
                     ggplot.plot <- ggplot(ggplot.data,mapping=aes(x=Position,
                         y=Signal,colour=Design)) +
@@ -404,15 +411,23 @@ recoupHeatmap <- function(recoupObj,samples=NULL,rc=NULL) {
             flank=recoupObj$callopts$flank,
             customIsBase=recoupObj$callopts$customIsBase
         ),
-        yAxisParams=list(
-            signalScale=recoupObj$callopts$plotParams$signalScale,
-            heatmapScale=recoupObj$callopts$plotParams$heatmapScale,
-            heatmapFactor=recoupObj$callopts$plotParams$heatmapFactor
-        ),
         binParams=recoupObj$callopts$binParams,
+        plotParams=recoupObj$callopts$plotParams,
         orderBy=recoupObj$callopts$orderBy,
         complexHeatmapParams=recoupObj$callopts$complexHeatmapParams
     )
+    
+    ############################################################################
+    # Failsafe until version stabilization
+    if (is.null(opts$plotParams$sumStat))
+        opts$plotParams$sumStat <- opts$binParams$sumStat
+    if (is.null(opts$plotParams$sumStat)) {
+        if (!is.null(opts$binParams$smooth))
+            opts$plotParams$smooth <- opts$binParams$smooth
+        else
+            opts$plotParams$smooth <- TRUE
+    }
+    ############################################################################
     
     if (is.null(input[[1]]$profile))
         stop("Profile matrix not found in the input object! Are you sure you ",
@@ -463,7 +478,7 @@ recoupHeatmap <- function(recoupObj,samples=NULL,rc=NULL) {
             input <- input[samples]
     }
     
-    if (opts$yAxisParams$signalScale=="log2") {
+    if (opts$plotParams$signalScale=="log2") {
         for (n in names(input)) {
             input[[n]]$profile <- input[[n]]$profile + 1
             input[[n]]$profile <- log2(input[[n]]$profile)
@@ -495,7 +510,7 @@ recoupHeatmap <- function(recoupObj,samples=NULL,rc=NULL) {
     colorFuns <- vector("list",length(input))
     names(colorFuns) <- names(input)
     profileColors <- unlist(sapply(input,function(x) return(x$color)))
-    if (opts$yAxisParams$heatmapScale=="each") {
+    if (opts$plotParams$heatmapScale=="each") {
         for (n in names(colorFuns)) {
             qs <- c(0.95,0.96,0.97,0.98,0.99,0.995,0.999)
             pos <- 1
@@ -506,7 +521,7 @@ recoupHeatmap <- function(recoupObj,samples=NULL,rc=NULL) {
                 if (sup!=0)
                     break
             }
-            supp <- opts$yAxisParams$heatmapFactor * sup
+            supp <- opts$plotParams$heatmapFactor * sup
             if (!is.null(profileColors))
                 colorFuns[[n]] <- colorRamp2(c(0,supp),c("white",
                     input[[n]]$color))
@@ -514,12 +529,12 @@ recoupHeatmap <- function(recoupObj,samples=NULL,rc=NULL) {
                 colorFuns[[n]] <- colorRamp2(c(0,supp),c("white","red2"))
         }
     }
-    else if (opts$yAxisParams$heatmapScale=="common") {
+    else if (opts$plotParams$heatmapScale=="common") {
         sups <- unlist(sapply(input,function(x) {
             return(quantile(x$profile,0.95))
         }))
         sup <- max(sups)
-        supp <- opts$yAxisParams$heatmapFactor * sup
+        supp <- opts$plotParams$heatmapFactor * sup
         for (n in names(colorFuns)) {
             if (!is.null(profileColors))
                 colorFuns[[n]] <- colorRamp2(c(0,supp), c("white",
@@ -598,16 +613,23 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
     ggplotParams$singleFacet <- recoupObj$callopts$plotParams$singleFacet
     ggplotParams$multiFacet <- recoupObj$callopts$plotParams$multiFacet
     opts <- list(
-        yAxisParams=list(
-            signalScale=recoupObj$callopts$plotParams$signalScale,
-            conf=recoupObj$callopts$plotParams$conf,
-            corrScale=recoupObj$callopts$plotParams$corrScale,
-            corrSmoothPar=recoupObj$callopts$plotParams$corrSmoothPar
-        ),
         orderBy=recoupObj$callopts$orderBy,
         binParams=recoupObj$callopts$binParams,
+        plotParams=recoupObj$callopts$plotParams,
         ggplotParams=ggplotParams
     )
+    
+    ############################################################################
+    # Failsafe until version stabilization
+    if (is.null(opts$plotParams$sumStat))
+        opts$plotParams$sumStat <- opts$binParams$sumStat
+    if (is.null(opts$plotParams$sumStat)) {
+        if (!is.null(opts$binParams$smooth))
+            opts$plotParams$smooth <- opts$binParams$smooth
+        else
+            opts$plotParams$smooth <- TRUE
+    }
+    ############################################################################
     
     if (is.null(input[[1]]$profile))
         stop("Profile matrix not found in the input object! Are you sure you ",
@@ -633,7 +655,7 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
     }
     
     # Normalize the profile if requested
-    if (opts$yAxisParams$corrScale=="normalized") {
+    if (opts$plotParams$corrScale=="normalized") {
         for (n in names(input))
             input[[n]]$profile <- input[[n]]$profile/max(input[[n]]$profile)
     }
@@ -654,15 +676,15 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
         signal <- unlist(lapply(profiles,function(x,s,p) {
             return(lowess(x$profile[s],f=p)$y)
             #return(smooth.spline(x$profile[s])$y)
-        },sorter$ix,opts$yAxisParams$corrSmoothPar))
+        },sorter$ix,opts$plotParams$corrSmoothPar))
         ymin <- unlist(lapply(profiles,function(x,s,p) {
             return(lowess(x$lower[s],f=p)$y)
             #return(smooth.spline(x$lower[s])$y)
-        },sorter$ix,opts$yAxisParams$corrSmoothPar))
+        },sorter$ix,opts$plotParams$corrSmoothPar))
         ymax <- unlist(lapply(profiles,function(x,s,p) {
             return(lowess(x$upper[s],f=p)$y)
             #return(smooth.spline(x$upper[s])$y)
-        },sorter$ix,opts$yAxisParams$corrSmoothPar))
+        },sorter$ix,opts$plotParams$corrSmoothPar))
         condition <- rep(names,each=length(index))
         
         # Create ggplot data frame
@@ -680,7 +702,7 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
                 colour=Condition)) + 
             geom_line(size=ggParams$lineSize)
        
-        if (opts$yAxisParams$conf)
+        if (opts$plotParams$conf)
             ggplot.plot <- ggplot.plot +
                 geom_ribbon(aes(x=Index,ymin=ymin,ymax=ymax,colour=Condition,
                     fill=Condition),alpha=0.3,size=0)
@@ -763,21 +785,21 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
                 return(x$profile[s])
             else
                 return(smooth.spline(x$profile[s],spar=p)$y)
-        },sorter,opts$yAxisParams$corrSmoothPar),use.names=FALSE)
+        },sorter,opts$plotParams$corrSmoothPar),use.names=FALSE)
         ymin <- unlist(lapply(designProfiles,function(x,s,p) {
             #return(lowess(x$lower[s],f=0.05)$y),sorter),
             if (any(is.na(x$lower[s])) || length(x$lower[s])<4)
                 return(x$lower[s])
             else
                 return(smooth.spline(x$lower[s],spar=p)$y)
-        },sorter,opts$yAxisParams$corrSmoothPar),use.names=FALSE)
+        },sorter,opts$plotParams$corrSmoothPar),use.names=FALSE)
         ymax <- unlist(lapply(designProfiles,function(x,s,p) {
             #return(lowess(x$upper[s],f=0.05)$y),sorter),
             if (any(is.na(x$lower[s])) || length(x$lower[s])<4)
                 return(x$lower[s])
             else
                 return(smooth.spline(x$upper[s],spar=p)$y)
-        },sorter,opts$yAxisParams$corrSmoothPar),use.names=FALSE)
+        },sorter,opts$plotParams$corrSmoothPar),use.names=FALSE)
             
         if (length(input)>1) { # Case where two factors max
             ggplot.data <- data.frame(
@@ -803,7 +825,7 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
                     colour=Condition)) + 
                 geom_line(size=ggParams$lineSize)
             
-            if (opts$yAxisParams$conf)
+            if (opts$plotParams$conf)
                 ggplot.plot <- ggplot.plot +
                     geom_ribbon(aes(x=Index,ymin=ymin,ymax=ymax,
                         colour=Condition,fill=Condition),alpha=0.3,size=0)
@@ -871,7 +893,7 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
                 ggplot.plot <- ggplot(ggplot.data,mapping=aes(x=Index,
                     y=Coverage,colour=Design)) +
                     geom_line(size=ggParams$lineSize)
-                if (opts$yAxisParams$conf)
+                if (opts$plotParams$conf)
                     ggplot.plot <- ggplot.plot +
                         geom_ribbon(aes(x=Index,ymin=ymin,ymax=ymax,
                             colour=Design,fill=Design),alpha=0.3,size=0)
@@ -880,7 +902,7 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
                 ggplot.plot <- ggplot(ggplot.data,mapping=aes(x=Index,
                     y=Coverage,colour=Condition)) +
                     geom_line(size=ggParams$lineSize)
-                if (opts$yAxisParams$conf)
+                if (opts$plotParams$conf)
                     ggplot.plot <- ggplot.plot +
                         geom_ribbon(aes(x=Index,ymin=ymin,ymax=ymax),
                             alpha=0.3,size=0)
@@ -926,7 +948,7 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
 
 calcPlotProfiles <- function(input,opts,sdim=c(2,1),rc) {
     sdim <- sdim[1]
-    if (opts$binParams$smooth)
+    if (opts$plotParams$smooth)
         profiles <- cmclapply(input,function(x,avgfun,scale) {
             if (scale=="log2") {
                 x$profile <- x$profile + 1
@@ -944,12 +966,12 @@ calcPlotProfiles <- function(input,opts,sdim=c(2,1),rc) {
                 message("Caught splines error: ",e)
                 o$profile <- apply(x$profile,sdim,avgfun)
                 varfun <- ifelse(avgfun=="mean","sd","mad")
-                va <- apply(x,2,varfun)
+                va <- apply(x$profile,sdim,varfun)
                 o$upper <- o$profile + va
                 o$lower <- o$profile - va
                 return(o)
             },finally="")
-        },opts$binParams$sumStat,opts$yAxisParams$signalScale,rc=rc)
+        },opts$plotParams$sumStat,opts$plotParams$signalScale,rc=rc)
     else
         profiles <- cmclapply(input,function(x,avgfun,scale) {
             if (scale=="log2") {
@@ -959,17 +981,17 @@ calcPlotProfiles <- function(input,opts,sdim=c(2,1),rc) {
             o <- list()
             o$profile <- apply(x$profile,sdim,avgfun)
             varfun <- ifelse(avgfun=="mean","sd","mad")
-            va <- apply(x,2,varfun)
+            va <- apply(x$profile,sdim,varfun)
             o$upper <- o$profile + va
             o$lower <- o$profile - va
             return(o)
-        },opts$binParams$sumStat,opts$yAxisParams$signalScale,rc=rc)
+        },opts$plotParams$sumStat,opts$plotParams$signalScale,rc=rc)
     return(profiles)
 }
 
 calcDesignPlotProfiles <- function(covmat,opts,sdim=c(2,1),rc) {
     sdim <- sdim[1]
-    if (opts$binParams$smooth)
+    if (opts$plotParams$smooth)
         profiles <- cmclapply(covmat,function(x,avgfun,scale) {
             if (scale=="log2") {
                 x <- x + 1
@@ -987,12 +1009,12 @@ calcDesignPlotProfiles <- function(covmat,opts,sdim=c(2,1),rc) {
                 message("Caught splines error: ",e)
                 o$profile <- apply(x,sdim,avgfun)
                 varfun <- ifelse(avgfun=="mean","sd","mad")
-                va <- apply(x,2,varfun)
+                va <- apply(x,sdim,varfun)
                 o$upper <- o$profile + va
                 o$lower <- o$profile - va
                 return(o)
             },finally="")
-        },opts$binParams$sumStat,opts$yAxisParams$signalScale,rc=rc)
+        },opts$plotParams$sumStat,opts$plotParams$signalScale,rc=rc)
     else
         profiles <- cmclapply(covmat,function(x,avgfun,scale) {
             if (scale=="log2") {
@@ -1002,11 +1024,11 @@ calcDesignPlotProfiles <- function(covmat,opts,sdim=c(2,1),rc) {
             o <- list()
             o$profile <- apply(x,sdim,avgfun)
             varfun <- ifelse(avgfun=="mean","sd","mad")
-            va <- apply(x,2,varfun)
+            va <- apply(x,sdim,varfun)
             o$upper <- o$profile + va
             o$lower <- o$profile - va
             return(o)
-        },opts$binParams$sumStat,opts$yAxisParams$signalScale,rc=rc)
+        },opts$plotParams$sumStat,opts$plotParams$signalScale,rc=rc)
     return(profiles)
 }
 

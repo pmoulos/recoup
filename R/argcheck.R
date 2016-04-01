@@ -169,8 +169,7 @@ validateListArgs <- function(what,arg.list) {
         },
         binParams = {
             valid.1 <- names(arg.list) %in% c("flankBinSize","regionBinSize",
-                "sumStat","smooth","interpolation","forceHeatmapBinning",
-                "forcedBinSize")
+                "sumStat","interpolation","forceHeatmapBinning","forcedBinSize")
             not.valid.1 <- which(!valid.1)
             if (length(not.valid.1)>0) {
                 warning("The following ",what," argument names are invalid ",
@@ -196,11 +195,6 @@ validateListArgs <- function(what,arg.list) {
                             arg.list$sumStat <- tolower(arg.list$sumStat[1])
                             checkTextArgs("The sumStat option of binParams",
                                 arg.list$sumStat,c("mean","median"))
-                        },
-                        smooth = {
-                            if (!is.logical(arg.list$smooth))
-                                stop("The smooth option of binParams ",
-                                    "parameter must be TRUE or FALSE!")
                         },
                         interpolation = {
                             arg.list$interpolation <- 
@@ -308,8 +302,8 @@ validateListArgs <- function(what,arg.list) {
         plotParams = {
             valid.1 <- names(arg.list) %in% c("plot","profile","heatmap",
                 "correlation","device","signalScale","heatmapScale",
-                "heatmapFactor","corrScale","corrSmoothPar","singleFacet",
-                "multiFacet","conf","outputDir","outputBase")
+                "heatmapFactor","corrScale","sumStat","smooth","corrSmoothPar",
+                "singleFacet","multiFacet","conf","outputDir","outputBase")
             not.valid.1 <- which(!valid.1)
             if (length(not.valid.1)>0) {
                 warning("The following ",what," argument names are invalid ",
@@ -385,6 +379,16 @@ validateListArgs <- function(what,arg.list) {
                                 arg.list$corrScale,
                                 c("normalized","each")
                             )
+                        },
+                        sumStat = {
+                            arg.list$sumStat <- tolower(arg.list$sumStat[1])
+                            checkTextArgs("The sumStat option of plotParams",
+                                arg.list$sumStat,c("mean","median"))
+                        },
+                        smooth = {
+                            if (!is.logical(arg.list$smooth))
+                                stop("The smooth option of plotParams ",
+                                    "parameter must be TRUE or FALSE!")
                         },
                         corrSmoothPar = {
                             checkNumArgs(
