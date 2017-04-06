@@ -26,10 +26,13 @@
             interpolation = c("auto", "spline", "linear", 
                 "neighborhood"),
             forceHeatmapBinning = TRUE,
-            forcedBinSize = c(50, 200)
+            forcedBinSize = c(50, 200),
+            chunking = FALSE
         ),
         selector = NULL,
         preprocessParams = list(
+			fragLen = NA,
+			cleanLevel = c(0, 1, 2, 3),
             normalize = c("none", "linear", 
                 "downsample","sampleto"),
             sampleTo = 1e+6,
@@ -249,6 +252,9 @@
         integers representing the \code{flankBinSize} and 
         \code{regionBinSize} to be used with 
         \code{forceHeatmapBinning} above.
+        \item \code{chunking}: \code{TRUE} (default) or
+        \code{FALSE}. When \code{TRUE}, recoup will try to 
+        chunk the data for profile matrix calculation.
     }
     See Details for a few further notes in the usage of 
     \code{binParams}.}
@@ -276,6 +282,13 @@
     BigWig files with processed signals. The list has the 
     following fields:
     \itemize{
+        \item \code{fragLen}: the expected DNA fragment 
+        length. Reads will be extended (or truncated)
+        to this size. Not used for RNA-Seq type plots.
+        \item \code{cleanLevel}: integer from 0 (default)
+        to 3, controlling read filtering level prior to 
+        profile generation. See details for further
+        information.
         \item \code{normalize}: one of \code{"none"}
         (default), \code{"linear", "downsample", 
         "sampleto"}. Controls how the coverages are 
@@ -283,7 +296,8 @@
         explanation of these options.
         \item \code{sampleTo}: a fixed library size for
         downsampling to be used with \code{"sampleto"}
-        option above.
+        option above. If a sample has less reads than
+        this fixed size, it is silently reported as is.
         \item \code{spliceAction}: one of \code{"split"}
         (default), \code{"keep", "remove"}. Controls the 
         action to be performed with spliced reads in the 
@@ -782,7 +796,19 @@
     reads using for example BEDTools for conversion. It
     should also be noted that in the case of BigWig files,
     only linear normalization is supported as there is no
-    information on raw reads.
+    information on raw reads. The \code{cleanLevel} field
+    controls what filtering will be applied to the raw 
+	reads read from BAM/BED files prior to producing the 
+	signal track. It can have four values: \code{0} for no
+	read processing/filtering, (use reads as they are, no 
+	uniqueness and no removal of unlocalized regions 
+	and mitochondrial DNA reads, unless filtered by the 
+	user before using \code{recoup}), \code{1} for removing 
+	unlocalized regions (e.g. chrU, hap, random etc.), 
+	\code{2} for removing reads of level 1 plus 
+	mitochondrial reads (chrM) and \code{3} for removing 
+	reads of level 2 plus using unique reads only. The 
+	default is level \code{0} (no filtering).
     
     Regarding the \code{heatmapFactor} option of 
     \code{plotParams}, it controls the color scale of the

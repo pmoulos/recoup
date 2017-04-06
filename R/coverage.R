@@ -1,34 +1,8 @@
-coverageRef <- function(input,genomeRanges,region=c("tss","tes","genebody",
-    "custom"),flank=c(2000,2000),strandedParams=list(strand=NULL,
-    ignoreStrand=TRUE),bamParams=NULL,rc=NULL) {
-    hasCoverage <- sapply(input,function(x) is.null(x$coverage))
-    if (!any(hasCoverage))
-        return(input)
-    if (region %in% c("tss","tes","custom")) {
-        if (region %in% c("tss","tes"))
-            input <- coverageBaseRef(input,genomeRanges,region,flank,
-                strandedParams,rc=rc)#,bamParams)
-        else if (region=="custom") {
-            if (all(width(genomeRanges)==1))
-                input <- coverageBaseRef(input,genomeRanges,region,flank,
-                    strandedParams,rc=rc)#,bamParams)
-            else
-                input <- coverageAreaRef(input,genomeRanges,region,flank,
-                    strandedParams,rc=rc)#,bamParams)
-        }
-    }
-    else # is genebody
-        input <- coverageAreaRef(input,genomeRanges,region,flank,strandedParams,
-            rc=rc)#,bamParams)
-    return(input)
-}
-
-coverageBaseRef <- function(input,genomeRanges,region,flank,strandedParams,
-    rc=NULL) {
-    mainRanges <- getRegionalRanges(genomeRanges,region,flank)
+coverageRef <- function(input,mainRanges,
+	strandedParams=list(strand=NULL,ignoreStrand=TRUE),rc=NULL) {
     names(input) <- sapply(input,function(x) return(x$id))
     for (n in names(input)) {
-        message("Calculating ",region," coverage for ",input[[n]]$name)
+        message("Calculating requested regions coverage for ",input[[n]]$name)
         if (!is.null(input[[n]]$ranges))
             input[[n]]$coverage <- calcCoverage(input[[n]]$ranges,mainRanges,
                 strand=strandedParams$strand,
@@ -41,84 +15,22 @@ coverageBaseRef <- function(input,genomeRanges,region,flank,strandedParams,
     return(input)
 }
 
-coverageAreaRef <- function(input,genomeRanges,region,flank,strandedParams,
-    bamParams=NULL,rc=NULL) {
-    mainRanges <- getRegionalRanges(genomeRanges,region,flank)
-    #leftRanges <- getFlankingRanges(mainRanges,flank[1],"upstream")
-    #rightRanges <- getFlankingRanges(mainRanges,flank[2],"downstream")
-    
-    names(input) <- sapply(input,function(x) return(x$id))
-    for (n in names(input)) {
-        message("Calculating ",region," coverage for ",input[[n]]$name)
-        if (!is.null(input[[n]]$ranges)) {
-            theRanges <- splitBySeqname(input[[n]]$ranges,rc=rc)
-            input[[n]]$coverage <- calcCoverage(theRanges,mainRanges,
-                strand=strandedParams$strand,
-                ignore.strand=strandedParams$ignoreStrand,rc=rc)
-        }
-        else 
-            input[[n]]$coverage <- calcCoverage(input[[n]]$file,mainRanges,
-                strand=strandedParams$strand,
-                ignore.strand=strandedParams$ignoreStrand,rc=rc)
-        #message(" center...")
-        #input[[n]]$coverage$center <- calcCoverage(theRanges,mainRanges,
-        #    strand=strandedParams$strand,
-        #    ignore.strand=strandedParams$ignoreStrand,rc=rc)
-        #message(" upstream...")
-        #input[[n]]$coverage$upstream <- calcCoverage(theRanges,leftRanges,
-        #    strand=strandedParams$strand,
-        #    ignore.strand=strandedParams$ignoreStrand,rc=rc)
-        #message(" downstream...")
-        #input[[n]]$coverage$downstream <- calcCoverage(theRanges,rightRanges,
-        #    strand=strandedParams$strand,
-        #    ignore.strand=strandedParams$ignoreStrand,rc=rc)
-    }
-    return(input)
-}
-
-coverageRnaRef <- function(input,genomeRanges,helperRanges,flank,
-    strandedParams=list(strand=NULL,ignoreStrand=TRUE),bamParams=NULL,rc=NULL) {
+coverageRnaRef <- function(input,mainRanges,
+    strandedParams=list(strand=NULL,ignoreStrand=TRUE),rc=NULL) {
     hasCoverage <- sapply(input,function(x) is.null(x$coverage))
     if (!any(hasCoverage))
         return(input)
-    if (flank[1]==0)
-        leftRanges <- getFlankingRanges(helperRanges,1,"upstream")
-    else
-        leftRanges <- getFlankingRanges(helperRanges,flank[1],"upstream")
-    if (flank[1]==0)
-        rightRanges <- getFlankingRanges(helperRanges,1,"downstream")
-    else
-        rightRanges <- getFlankingRanges(helperRanges,flank[2],"downstream")
     names(input) <- sapply(input,function(x) return(x$id))
     for (n in names(input)) {
+        message("Calculating genebody exon coverage for ",input[[n]]$name)
         if (!is.null(input[[n]]$ranges))
             theRanges <- splitBySeqname(input[[n]]$ranges)
         else
             theRanges <- input[[n]]$file
-        message("Calculating genebody coverage for ",input[[n]]$name)
-        message(" center...")
-        #input[[n]]$coverage$center <- 
-        center <- calcCoverage(theRanges,genomeRanges,
+        input[[n]]$coverage <- calcCoverage(theRanges,mainRanges,
             strand=strandedParams$strand,
             ignore.strand=strandedParams$ignoreStrand,rc=rc)
-        message(" upstream...")
-        #input[[n]]$coverage$upstream <- 
-        left <- calcCoverage(theRanges,leftRanges,
-            strand=strandedParams$strand,
-            ignore.strand=strandedParams$ignoreStrand,rc=rc)
-        message(" downstream...")
-        #input[[n]]$coverage$downstream <- 
-        right <- calcCoverage(theRanges,rightRanges,
-            strand=strandedParams$strand,
-            ignore.strand=strandedParams$ignoreStrand,rc=rc)
-        message("   merging...")
-        input[[n]]$coverage <- cmclapply(1:length(center),function(i,le,ce,ri) {
-            if (any(is.null(le[[i]]),is.null(ce[[i]]),is.null(ri[[i]])))
-                return(NULL)
-            else
-                return(c(le[[i]],ce[[i]],ri[[i]]))
-        },left,center,right,rc=rc)
-        names(input[[n]]$coverage) <- names(genomeRanges)
+        names(input[[n]]$coverage) <- names(mainRanges)
     }
     return(input)
 }
@@ -144,14 +56,24 @@ calcCoverage <- function(input,mask,strand=NULL,ignore.strand=TRUE,rc=NULL) {
     }
     if (!is.list(input) && !isBam && !isBigWig)
         input <- splitBySeqname(input)
-    index <- 1:length(mask)
-    if (isBam)
-        cov <- cmclapply(index,coverageFromBam,mask,input,ignore.strand,rc=rc)
+    if (is(mask,"GRanges"))
+        #index <- 1:length(mask)
+        index <- split(1:length(mask),as.character(seqnames(mask)))
+    else if (is(mask,"GRangesList"))
+        index <- split(1:length(mask),as.character(runValue(seqnames(mask))))
+    if (isBam) {
+        index2 <- 1:length(mask)
+        cov <- cmclapply(index2,coverageFromBam,mask,input,ignore.strand,rc=rc)
+    }
     else if (isBigWig)
-        cov <- cmclapply(index,coverageFromBigWig,mask,input,rc=rc)
+        #cov <- cmclapply(index,coverageFromBigWig,mask,input,rc=rc)
+        cov <- unlist(lapply(index,coverageFromBigWig,mask,input,rc=rc),
+            use.names=FALSE)
     else
-        cov <- cmclapply(index,coverageFromRanges,mask,input,ignore.strand,
-            rc=rc)
+        #cov <- cmclapply(index,coverageFromRanges,mask,input,ignore.strand,
+        #    rc=rc)
+        cov <- unlist(lapply(index,coverageFromRanges,mask,input,
+            ignore.strand,rc=rc))
     
     # Failed effort to chunk the reference genomic ranges, takes more time
     #if (length(index)<=1000)
@@ -168,12 +90,134 @@ calcCoverage <- function(input,mask,strand=NULL,ignore.strand=TRUE,rc=NULL) {
     #        return(cmclapply(i,coverageFromRanges,mask,input,ignore.strand,rc=rc))
     #    },mask,input,ignore.strand,rc=rc),recursive=FALSE)
     
-    names(cov) <- names(mask)
+    # Naming is problematic with this implementation if a chromosome is missing
+    # from one of the samples so is not filtered in the main recoup function
+    # object preparation
+    #names(cov) <- names(mask) # !Will not work in the case described above
+    theNames <- 
+        unlist(lapply(strsplit(names(cov),"\\."),
+            function(x) return(x[length(x)])))
+    names(cov) <- theNames
     gc(verbose=FALSE)
     return(cov) # Rle
 }
 
-coverageFromRanges <- function(i,mask,input,ignore.strand) {
+coverageFromRanges <- function(i,mask,input,ignore.strand,rc=NULL) {
+    x <- mask[i]
+    if (is(x,"GRanges")) {
+        y<-list(
+            chromosome=as.character(seqnames(x))[1], 
+            start=start(x),
+            end=end(x),
+            strand=as.character(strand(x)),
+            reads=NULL,
+            coverage=NULL
+        )
+        message("  processing ",y$chromosome)
+        if (!is.null(input[[y$chromosome]])) {
+            #S <- unique(subjectHits(findOverlaps(x,input[[y$chromosome]],
+            #    ignore.strand=ignore.strand)))
+            #y$reads <- input[[y$chromosome]][S]
+            y$reads <- input[[y$chromosome]][
+                unique(subjectHits(findOverlaps(x,input[[y$chromosome]],
+                    ignore.strand=ignore.strand)))]
+        }
+        else {
+            message(y$chromosome," not found!")
+            y$reads <- NULL
+        }
+        if (length(y$reads)>0) {
+            xCov <- coverage(x)
+            cc <- as.character(seqnames(y$reads))[1]
+            #tt <- table(S)
+            #w <- rep(1,length(S))
+            #for (ii in unique(tt)) 
+            #    w[tt==ii] <- w[tt==ii]/ii
+            #y$coverage <- coverage(y$reads,weight=w)
+            y$coverage <- coverage(y$reads)
+            y$coverage <- y$coverage[[cc]]
+            xCov <- xCov[[cc]]
+            covs <- cmclapply(1:length(y$start),function(j,s,e,d,r) {
+                tryCatch({
+                    if (d[j] == "+")
+                        return(r[s[j]:e[j]]/xCov[s[j]:e[j]])
+                    else if (d[j] == "-")
+                        return(rev(r[s[j]:e[j]]/xCov[s[j]:e[j]]))
+                    else
+                        return(r[s[j]:e[j]]/xCov[s[j]:e[j]])
+                },
+                error=function(e) {
+                    message("Caught invalid genomic area!")
+                    print(mask[i][j])
+                    message("Will return zero coverage")
+                    return(Rle(NA))
+                    #return(NA)
+                },finally={})
+            },y$start,y$end,y$strand,y$coverage,rc=rc)
+            names(covs) <- names(x)
+            return(covs)
+        }
+        else
+            return(Rle(NA))
+            #return(NA)
+    }
+    else if (is(x,"GRangesList")) {
+        y<-list(
+            # Chrom and strand should always be the same from higher functions
+            chromosome=as.character(seqnames(x)[[1]])[1],
+            start=start(x), # Integer list
+            end=end(x), # Integer list
+            strand=as.character(strand(x)[[1]])[1],
+            reads=NULL,
+            coverage=NULL
+        )
+        message("  processing ",y$chromosome)
+        if (!is.null(input[[y$chromosome]])) {
+            y$reads <- input[[y$chromosome]][
+                subjectHits(findOverlaps(x,input[[y$chromosome]],
+                    ignore.strand=ignore.strand))]
+        }
+        else {
+            message(y$chromosome," not found!")
+            y$reads <- NULL
+        }
+        if (length(y$reads)>0) {
+            #xCov <- coverage(x)
+            cc <- as.character(seqnames(y$reads))[1]
+            y$coverage <- coverage(y$reads)
+            y$coverage <- y$coverage[[cc]]
+            #xCov <- xCov[[cc]]
+            covs <- cmclapply(1:length(y$start),function(j,s,e,d,r) {
+                tryCatch({
+                    subinds <- unlist(lapply(1:length(s[[j]]),function(k,ss,ee) {
+                        return(ss[[k]]:ee[[k]])
+                    },s[[j]],e[[j]]))
+                    if (d == "+")
+                        #return(r[subinds]/xCov[subinds])
+                        return(r[subinds])
+                    else if (d == "-")
+                        #return(rev(r[subinds]/xCov[subinds]))
+                        return(rev(r[subinds]))
+                    else
+                        #return(r[subinds]/xCov[subinds])
+                        return(r[subinds])
+                },error=function(e) {
+                        print(e)
+                        message("Caught invalid genomic area!")
+                        print(mask[i][j])
+                        message("Will return zero coverage")
+                        return(Rle(NA))
+                    },finally={})
+                },y$start,y$end,y$strand,y$coverage,rc=NULL)
+            names(covs) <- names(x)
+            return(covs)
+        }
+        else
+            return(Rle(NA))
+    }
+}
+
+coverageFromRangesOld <- function(i,mask,input,ignore.strand) {
     if (is(mask,"GRangesList"))
         x <- mask[[i]]
     else
@@ -188,8 +232,8 @@ coverageFromRanges <- function(i,mask,input,ignore.strand) {
     )
     if (!is.null(input[[y$chromosome]])) {
         y$reads <- input[[y$chromosome]][
-            subjectHits(findOverlaps(x,input[[y$chromosome]],
-                ignore.strand=ignore.strand))]
+            unique(subjectHits(findOverlaps(x,input[[y$chromosome]],
+                ignore.strand=ignore.strand)))]
     }
     else {
         message(y$chromosome," not found!")
@@ -223,6 +267,97 @@ coverageFromRanges <- function(i,mask,input,ignore.strand) {
     }
     else
         return(NULL)
+}
+
+coverageFromBigWig <- function(i,mask,input,rc=NULL) {
+    if (!requireNamespace("rtracklayer"))
+        stop("R package rtracklayer is required to calculate coverage from ",
+            "BigWig files!")
+    x <- mask[i]
+    if (is(mask,"GRanges")) {
+        chr <- as.character(seqnames(x))[1]
+        bwrle <- import.bw(input,selection=BigWigSelection(x),as="RleList")
+        if (chr %in% names(bwrle)) {
+            covs <- cmclapply(x,function(y) {
+                tryCatch(
+                    return(bwrle[[chr]][start(y):end(y)]),
+                    error=function(e) {
+                        message("Caught invalid genomic area!")
+                        print(y)
+                        message("Will return zero coverage")
+                        return(Rle(NA))
+                    },
+                    finally={}
+                )
+            },rc=rc)
+            names(covs) <- names(x)
+            return(covs)
+        }
+        else {
+            message(chr,"not found!")
+            return(Rle(NA))
+        }
+    }
+    else if (is(x,"GRangesList")) {
+        chr <- as.character(seqnames(x)[[1]])[1]
+        message("  processing ",chr)
+        covs <- cmclapply(x,function(y) {
+            bwrle <- import.bw(input,selection=BigWigSelection(y),as="RleList")
+            if (chr %in% names(bwrle)) {
+                tmp <- bwrle[[chr]]
+                i2k <- unlist(lapply(1:length(start(y)),function(j,s,e) {
+                    return(s[j]:e[j])
+                },start(y),end(y)))
+                tryCatch(
+                    return(tmp[i2k]),
+                    error=function(e) {
+                        message("Caught invalid genomic area!")
+                        print(y)
+                        message("Will return zero coverage")
+                        return(Rle(NA))
+                    },
+                    finally={}
+                )
+            }
+            else {
+                message(chr,"not found!")
+                return(Rle(NA))
+            }
+        },rc=rc)
+        names(covs) <- names(x)
+        return(covs)
+    }
+}
+
+coverageFromBigWigOld <- function(i,mask,input) {
+    if (!requireNamespace("rtracklayer")) {
+        stop("R package rtracklayer is required to calculate coverage from ",
+            "BigWig files!")
+    }
+    if (is(mask,"GRangesList"))
+        x <- mask[[i]]
+    else
+        x <- mask[i]
+    chr <- as.character(seqnames(x))[1]
+    bwrle <- import.bw(input,selection=BigWigSelection(x),as="RleList")
+    bwcov <- NULL
+    if (chr %in% names(bwrle)) {
+        bwcov <- tryCatch(
+            bwrle[[chr]][start(x):end(x)],
+            error=function(e) {
+                message("Caught invalid genomic area!")
+                print(mask[i])
+                message("Will return zero coverage")
+                return(NULL)
+            },
+            finally={}
+        )
+        return(bwcov)
+    }
+    else {
+        message(chr,"not found!")
+        return(NULL)
+    }
 }
 
 coverageFromBam <- function(i,mask,input,ignore.strand,
@@ -294,29 +429,118 @@ coverageFromBam <- function(i,mask,input,ignore.strand,
         return(NULL)
 }
 
-coverageFromBigWig <- function(i,mask,input) {
-    if (is(mask,"GRangesList"))
-        x <- mask[[i]]
-    else
-        x <- mask[i]
-    chr <- as.character(seqnames(x))[1]
-    bwrle <- import.bw(input,selection=BigWigSelection(x),as="RleList")
-    bwcov <- NULL
-    if (chr %in% names(bwrle)) {
-        bwcov <- tryCatch(
-            bwrle[[chr]][start(x):end(x)],
-            error=function(e) {
-                message("Caught invalid genomic area!")
-                print(mask[i])
-                message("Will return zero coverage")
-                return(NULL)
-            },
-            finally={}
-        )
-        return(bwcov)
-    }
-    else {
-        message(chr,"not found!")
-        return(NULL)
-    }
-}
+#coverageFromRanges <- function(i,mask,input,ignore.strand,flank,binParams,
+#   rc=NULL) {
+#    x <- mask[i]
+#    if (is(x,"GRanges")) {
+#        y<-list(
+#            chromosome=as.character(seqnames(x))[1], 
+#            start=start(x),
+#            end=end(x),
+#            strand=as.character(strand(x)),
+#            reads=NULL,
+#            coverage=NULL
+#        )
+#        message("  processing ",y$chromosome)
+#        if (!is.null(input[[y$chromosome]])) {
+#            #S <- unique(subjectHits(findOverlaps(x,input[[y$chromosome]],
+#            #    ignore.strand=ignore.strand)))
+#            #y$reads <- input[[y$chromosome]][S]
+#            y$reads <- input[[y$chromosome]][
+#                unique(subjectHits(findOverlaps(x,input[[y$chromosome]],
+#                    ignore.strand=ignore.strand)))]
+#        }
+#        else {
+#            message(y$chromosome," not found!")
+#            y$reads <- NULL
+#        }
+#        if (length(y$reads)>0) {
+#            xCov <- coverage(x)
+#            cc <- as.character(seqnames(y$reads))[1]
+#            #tt <- table(S)
+#            #w <- rep(1,length(S))
+#            #for (ii in unique(tt)) 
+#            #    w[tt==ii] <- w[tt==ii]/ii
+#            #y$coverage <- coverage(y$reads,weight=w)
+#            y$coverage <- coverage(y$reads)
+#            y$coverage <- y$coverage[[cc]]
+#            xCov <- xCov[[cc]]
+#            covs <- cmclapply(1:length(y$start),function(j,s,e,d,r) {
+#                tryCatch({
+#                    if (d[j] == "+")
+#                        return(r[s[j]:e[j]]/xCov[s[j]:e[j]])
+#                    else if (d[j] == "-")
+#                        return(rev(r[s[j]:e[j]]/xCov[s[j]:e[j]]))
+#                    else
+#                        return(r[s[j]:e[j]]/xCov[s[j]:e[j]])
+#                },
+#               error=function(e) {
+#                    message("Caught invalid genomic area!")
+#                    print(mask[i][j])
+#                    message("Will return zero coverage")
+#                    return(Rle(NA))
+#                    #return(NA)
+#                },finally={})
+#            },y$start,y$end,y$strand,y$coverage,rc=rc)
+#            profs <- profileMatrixSeg(covs,flank,binParams,rc=rc)
+#            return(list(covs=covs,profs=profs))
+#        }
+#        else
+#            return(Rle(NA))
+#            #return(NA)
+#    }
+#    else if (is(x,"GRangesList")) {
+#        y<-list(
+#            # Chrom and strand should always be the same from higher functions
+#            chromosome=as.character(seqnames(x)[[1]])[1],
+#            start=start(x), # Integer list
+#            end=end(x), # Integer list
+#            strand=as.character(strand(x)[[1]])[1],
+#            reads=NULL,
+#            coverage=NULL
+#        )
+#        message("  processing ",y$chromosome)
+#        if (!is.null(input[[y$chromosome]])) {
+#            y$reads <- input[[y$chromosome]][
+#                subjectHits(findOverlaps(x,input[[y$chromosome]],
+#                    ignore.strand=ignore.strand))]
+#        }
+#        else {
+#            message(y$chromosome," not found!")
+#            y$reads <- NULL
+#        }
+#        if (length(y$reads)>0) {
+#            #xCov <- coverage(x)
+#            cc <- as.character(seqnames(y$reads))[1]
+#            y$coverage <- coverage(y$reads)
+#            y$coverage <- y$coverage[[cc]]
+#            #xCov <- xCov[[cc]]
+#            covs <- cmclapply(1:length(y$start),function(j,s,e,d,r) {
+#                tryCatch({
+#                    subinds <- unlist(lapply(1:length(s[[j]]),function(k,ss,ee) {
+#                        return(ss[[k]]:ee[[k]])
+#                    },s[[j]],e[[j]]))
+#                    if (d == "+")
+#                        #return(r[subinds]/xCov[subinds])
+#                        return(r[subinds])
+#                    else if (d == "-")
+#                        #return(rev(r[subinds]/xCov[subinds]))
+#                        return(rev(r[subinds]))
+#                    else
+#                        #return(r[subinds]/xCov[subinds])
+#                        return(r[subinds])
+#                },error=function(e) {
+#                        print(e)
+#                        message("Caught invalid genomic area!")
+#                        print(mask[i][j])
+#                        message("Will return zero coverage")
+#                        return(Rle(NA))
+#                },finally={})
+#            },y$start,y$end,y$strand,y$coverage,rc=NULL)
+#            profs <- profileMatrixSeg(covs,flank,binParams,rc=rc)
+#            return(list(covs=covs,profs=profs))
+#        }
+#        else
+#            return(Rle(NA))
+#    }
+#}

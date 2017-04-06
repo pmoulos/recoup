@@ -37,10 +37,9 @@ checkNumArgs <- function(arg.name,arg.value,arg.type,arg.bounds,direction) {
                     both = {
                         if (arg.value<=arg.bounds[1] ||
                             arg.value>=arg.bounds[2])
-                            stop(arg.name," parameter must be a numeric ",
-                                "value larger than or equal to ",arg.bounds[1],
-                                " and smaller than or equal to ",arg.bounds[2],
-                                "!")
+                            stop(arg.name," parameter must be a numeric value ",
+                                "larger than ",arg.bounds[1]," and smaller ",
+                                "than ",arg.bounds[2],"!")
                     },
                     botheq = {
                         if (arg.value<arg.bounds[1] || arg.value>arg.bounds[2])
@@ -80,9 +79,8 @@ checkNumArgs <- function(arg.name,arg.value,arg.type,arg.bounds,direction) {
                         if (arg.value<=arg.bounds[1] ||
                             arg.value>=arg.bounds[2])
                             stop(arg.name," parameter must be an integer ",
-                                "larger than or equal to ",arg.bounds[1],
-                                " and smaller than or equal to ",arg.bounds[2],
-                                "!")
+                                "larger than ",arg.bounds[1]," and smaller ",
+                                "than ",arg.bounds[2],"!")
                     },
                     botheq = {
                         if (arg.value<arg.bounds[1] || arg.value>arg.bounds[2])
@@ -169,7 +167,8 @@ validateListArgs <- function(what,arg.list) {
         },
         binParams = {
             valid.1 <- names(arg.list) %in% c("flankBinSize","regionBinSize",
-                "sumStat","interpolation","forceHeatmapBinning","forcedBinSize")
+                "sumStat","interpolation","forceHeatmapBinning","forcedBinSize",
+                "chunking")
             not.valid.1 <- which(!valid.1)
             if (length(not.valid.1)>0) {
                 warning("The following ",what," argument names are invalid ",
@@ -220,7 +219,12 @@ validateListArgs <- function(what,arg.list) {
                                 "The second forcedBinSize option of binParams",
                                 arg.list$forcedBinSize[2],"numeric",0,"gte"
                             )
-                        }
+                        },
+                        chunking = {
+                            if (!is.logical(arg.list$chunking))
+                                stop("The chunking option of binParams ",
+                                    "parameter must be TRUE or FALSE!")
+                        },
                     )
                 }
             }
@@ -240,8 +244,9 @@ validateListArgs <- function(what,arg.list) {
             # program might crash elsewhere.
         },
         preprocessParams = {
-            valid.1 <- names(arg.list) %in% c("normalize","sampleTo",
-                "spliceAction","spliceRemoveQ","bedGenome","seed")
+            valid.1 <- names(arg.list) %in% c("fragLen","cleanLevel",
+				"normalize","sampleTo","spliceAction","spliceRemoveQ",
+				"bedGenome","seed")
             not.valid.1 <- which(!valid.1)
             if (length(not.valid.1)>0) {
                 warning("The following ",what," argument names are invalid ",
@@ -252,6 +257,21 @@ validateListArgs <- function(what,arg.list) {
             if (length(arg.list)>0) {
                 for (n in names(arg.list)) {
                     switch(n,
+                        fragLen = {
+							if (!is.na(arg.list$fragLen))
+								checkNumArgs(
+									"The fragLen option of preprocessParams",
+									arg.list$fragLen,"numeric",0,"gt"
+								)
+                        },
+                        cleanLevel = {
+							arg.list$cleanLevel <- 
+								as.integer(arg.list$cleanLevel[1])
+                            checkNumArgs(
+                                "The cleanLevel option of preprocessParams",
+                                arg.list$cleanLevel,"integer",c(0,3),"botheq"
+                            )
+                        },
                         normalize = {
                             arg.list$normalize <- tolower(arg.list$normalize[1])
                             checkTextArgs(
@@ -541,8 +561,8 @@ validateListArgs <- function(what,arg.list) {
                     switch(n,
                         strand = {
                             if (!is.null(arg.list$strand))
-                                checkTextArgs("The strand option of ",
-                                    "strandParams ",arg.list$strand,c("+","-"))
+                                checkTextArgs(paste0("The strand option of ",
+                                    "strandParams "),arg.list$strand,c("+","-"))
                         },
                         ignoreStrand = {
                             if (!is.logical(arg.list$ignoreStrand))

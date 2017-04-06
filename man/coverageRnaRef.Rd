@@ -5,11 +5,8 @@
 \usage{
     coverageRnaRef(
         input, 
-        genomeRanges, 
-        helperRanges,
-        flank,
+        mainRanges,
         strandedParams = list(strand=NULL, ignoreStrand=TRUE),
-        bamParams = NULL,
         rc = NULL
     )
 }
@@ -18,22 +15,11 @@
     with the \code{ranges} field of each member filled 
     (e.g. after using \code{\link{preprocessRanges}}).}
 
-    \item{genomeRanges}{a named \code{GRangesList} where
+    \item{mainRanges}{a named \code{GRangesList} where
     list member names are genes and list members are 
     \code{GRanges} representing each gene's exons.}
     
-    \item{helperRanges}{the \code{genome} from 
-    \code{\link{recoup}} as a \code{GRanges} object (e.g. 
-    the output from 
-    \code{\link{makeGRangesFromDataFrame}}).}
-        
-    \item{flank}{see the \code{flank} argument in the 
-    main \code{\link{recoup}} function.}
-    
     \item{strandedParams}{see the \code{strandedParams} 
-    argument in the main \code{\link{recoup}} function.}
-    
-    \item{bamParams}{see the \code{bamParams} 
     argument in the main \code{\link{recoup}} function.}
     
     \item{rc}{fraction (0-1) of cores to use in a multicore 
@@ -63,9 +49,7 @@ testGenomeRanges <- makeGRangesFromDataFrame(df=test.genome,
     keep.extra.columns=TRUE)
 test.input <- coverageRnaRef(
     test.input,
-    genomeRanges=test.exons,
-    helperRanges=testGenomeRanges,
-    flank=c(2000,2000)
+    mainRanges=test.exons
 )
 }
 \author{

@@ -5,11 +5,8 @@
 \usage{
     coverageRef(
         input, 
-        genomeRanges, 
-        region = c( "tss", "tes", "genebody", "custom"),
-        flank = c(2000, 2000),
+        mainRanges,
         strandedParams = list(strand=NULL, ignoreStrand=TRUE),
-        bamParams = NULL,
         rc = NULL
     )
 }
@@ -18,21 +15,12 @@
     with the \code{ranges} field of each member filled 
     (e.g. after using \code{\link{preprocessRanges}}).}
 
-    \item{genomeRanges}{the \code{genome} from 
+    \item{mainRanges}{the \code{genome} from 
     \code{\link{recoup}} as a \code{GRanges} object (e.g. 
     the output from 
     \code{\link{makeGRangesFromDataFrame}}).}
     
-    \item{region}{see the \code{region} argument in the 
-    main \code{\link{recoup}} function.}
-    
-    \item{flank}{see the \code{flank} argument in the 
-    main \code{\link{recoup}} function.}
-    
     \item{strandedParams}{see the \code{strandedParams} 
-    argument in the main \code{\link{recoup}} function.}
-    
-    \item{bamParams}{see the \code{bamParams} 
     argument in the main \code{\link{recoup}} function.}
     
     \item{rc}{fraction (0-1) of cores to use in a multicore 
@@ -55,12 +43,9 @@ testGenomeRanges <- makeGRangesFromDataFrame(df=test.genome,
     keep.extra.columns=TRUE)
 test.input <- coverageRef(
     test.input, 
-    genomeRanges=testGenomeRanges, 
-    region="tss",
-    flank=c(2000,2000)
+    mainRanges=testGenomeRanges
 )
 }
 \author{
     Panagiotis Moulos
 }
-

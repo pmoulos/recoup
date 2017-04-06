@@ -20,12 +20,15 @@ recoup <- function(
         sumStat=c("mean","median"),
         interpolation=c("auto","spline","linear","neighborhood"),
         forceHeatmapBinning=TRUE,
-        forcedBinSize=c(50,200)
+        forcedBinSize=c(50,200),
+        chunking=FALSE
     ),
     #binParams=getDefaultListArgs("binParams"),
     selector=NULL,
     #selector=getDefaultListArgs("selector"),
     preprocessParams=list(
+		fragLen=NA,
+		cleanLevel=c(0,1,2,3),
         normalize=c("none","linear","downsample","sampleto"),
         sampleTo=1e+6,
         spliceAction=c("split","keep","remove"),
@@ -169,6 +172,14 @@ recoup <- function(
             "genebodies! Switching to genebody regions...",immediate.=TRUE)
         region <- "genebody"
     }
+    
+    # If type is rnaseq, read extension is illegal because of potential splicing
+    if (type=="rnaseq" && !is.null(preprocessParams$fragLen)
+		&& !is.na(preprocessParams$fragLen)) {
+		warning("When type is \"rnaseq\", read extension/reduction should not ",
+            "happen because of potential splicing! Ignoring...",immediate.=TRUE)
+		preprocessParams$fragLen <- NA
+	}
     
     # and list arguments
     orderByDefault <- getDefaultListArgs("orderBy")
@@ -334,20 +345,56 @@ recoup <- function(
                 if (type=="chipseq") {
                     g <- load(file.path(localDbHome,refdb,genome,"gene.rda"))
                     genomeRanges <- gene
+                    helperRanges <- NULL
                 }
                 else if (type=="rnaseq") {
-                    g <- load(file.path(localDbHome,refdb,genome,
-                        "summarized_exon.rda"))
-                    genomeRanges <- sexon
+                    # Load the helper ranges anyway
                     g <- load(file.path(localDbHome,refdb,genome,"gene.rda"))
                     helperRanges <- gene
+                    if (all(flank==0)) {
+                        g <- load(file.path(localDbHome,refdb,genome,
+                            "summarized_exon.rda"))
+                        genomeRanges <- sexon
+                    }
+                    else if (all(flank==500)) {
+                        g <- load(file.path(localDbHome,refdb,genome,
+                            "summarized_exon_F500.rda"))
+                        genomeRanges <- flankedSexon
+                    }
+                    else if (all(flank==1000)) {
+                        g <- load(file.path(localDbHome,refdb,genome,
+                            "summarized_exon_F1000.rda"))
+                        genomeRanges <- flankedSexon
+                    }
+                    else if (all(flank==2000)) {
+                        g <- load(file.path(localDbHome,refdb,genome,
+                            "summarized_exon_F2000.rda"))
+                        genomeRanges <- flankedSexon
+                    }
+                    else if (all(flank==5000)) {
+                        g <- load(file.path(localDbHome,refdb,genome,
+                            "summarized_exon_F2000.rda"))
+                        genomeRanges <- flankedSexon
+                    }
+                    else {
+                        warning("When using recoup in RNA-Seq mode, it is ",
+                            "much faster to use a precalculated set of ",
+                            "regions and their flanks (0, 500, 1000, 2000 and ",
+                            "5000 bps supported) and subset this one for a ",
+                            "custom set of genes. Otherwise calculations may ",
+                            "take too long to complete.",immediate.=TRUE)
+                        genomeRanges <- 
+                            getMainRnaRangesOnTheFly(helperRanges,flank,rc=rc)
+                    }
                 }
             }
             else { # On the fly
                 message("Getting annotation on the fly for ",genome," from ",
                     refdb)
-                if (type=="chipseq")
+                if (type=="chipseq") {
                     genome <- getAnnotation(genome,"gene",refdb=refdb,rc=rc)
+                    helperRanges <- NULL
+                }
                 else if (type=="rnaseq") {
                     helper <- getAnnotation(genome,"gene",refdb=refdb,rc=rc)
                     helperRanges <- makeGRangesFromDataFrame(
@@ -464,70 +511,8 @@ recoup <- function(
         }
     }
     
-    # Here we must write code for the reading and normalization of bam files
-    # The preprocessRanges function looks if there is a valid (not null) ranges
-    # field in input
-    #if (!onTheFly)
-    input <- preprocessRanges(input,preprocessParams,bamParams=bamParams,rc=rc)
-    
-    # At this point we must apply the fraction parameter if <1. We choose this
-    # point in order not to restrict later usage of the read ranges and since it
-    # does not take much time to load into memory.
-    if (fraction<1) {
-        newSize <- round(fraction*length(genomeRanges))
-        set.seed(preprocessParams$seed)
-        refIndex <- sort(sample(length(genomeRanges),newSize))
-        genomeRanges <- genomeRanges[refIndex]
-        if (type=="rnaseq")
-            helperRanges <- helperRanges[refIndex]
-        for (i in 1:length(input)) {
-            if (!is.null(input[[i]]$ranges)) {
-                newSize <- round(fraction*length(input[[i]]$ranges))
-                set.seed(preprocessParams$seed)
-                fracIndex <- sort(sample(length(input[[i]]$ranges),newSize))
-                input[[i]]$ranges <- input[[i]]$ranges[fracIndex]
-            }
-            if (!is.null(input[[i]]$coverage)) {
-                #if (!is.null(input[[i]]$coverage$center)) {
-                #    input[[i]]$coverage$center <- 
-                #        input[[i]]$coverage$center[refIndex]
-                #}
-                #else
-                input[[i]]$coverage <- input[[i]]$coverage[refIndex]
-            }
-            if (!is.null(input[[i]]$profile))
-                input[[i]]$profile <- input[[i]]$profile[refIndex,]
-        }
-    }
-
-    # Remove unwanted seqnames from reference ranges
-    chrs <- unique(unlist(lapply(input,function(x) {
-        if (x$format %in% c("bam","bed"))
-            return(as.character(runValue(seqnames(x$ranges))))
-        else if (x$format=="bigwig")
-            return(as.character(seqnames(seqinfo(BigWigFile(x$file)))))
-    })))
-    if (type=="chipseq") {
-        keep <- which(as.character(seqnames(genomeRanges)) %in% chrs)
-        genomeRanges <- genomeRanges[keep]
-    }
-    else if (type=="rnaseq") {
-        keeph <- which(as.character(seqnames(helperRanges)) %in% chrs)
-        helperRanges <- helperRanges[keeph]
-        genomeRanges <- genomeRanges[names(helperRanges)]
-        ########################################################################
-        ## There must be an R bug with `lengths` here as although it runs in 
-        ## Rcmd, it does not pass package building or vignette kniting... But 
-        ## for the time being it seems that it is not needed as the name 
-        ## filtering works
-        #lens <- which(lengths(genomeRanges)==0)
-        #if (length(lens)>0)
-        #    genomeRanges[lens] <- NULL
-        ########################################################################
-    }
-    
     # Now we must follow two paths according to region type, genebody and custom
-    # areas with equal/unequal widths, or tss, tes and 1-width custom areas
+    # areas with equal/unequal widths, or tss, tes and 1-width custom areas.
     callParams$customIsBase <- FALSE
     if (region=="custom" && all(width(genomeRanges)==1)) {
         if (all(flank==0)) {
@@ -548,13 +533,145 @@ recoup <- function(
             callParams$flank <- flank
         }
     }
-    if (type=="chipseq")
-        input <- coverageRef(input,genomeRanges,region,flank,strandedParams,
-            rc=rc)#,bamParams)
-    else if (type=="rnaseq")
-        input <- coverageRnaRef(input,genomeRanges,helperRanges,flank,
-            strandedParams,rc=rc)#,bamParams)
     
+    # Here we must determine the final ranges to pass to preprocessRanges and
+    # then work with these later on
+    intermRanges <- getMainRanges(genomeRanges,helperRanges=helperRanges,type,
+        region,flank,rc=rc)
+    mainRanges <- intermRanges$mainRanges
+    bamRanges <- intermRanges$bamRanges
+
+    # Here we must write code for the reading and normalization of bam files
+    # The preprocessRanges function looks if there is a valid (not null) ranges
+    # field in input
+    #if (!onTheFly)
+    #input <- preprocessRanges(input,preprocessParams,bamParams=bamParams,rc=rc)
+    input <- preprocessRanges(input,preprocessParams,genome,bamRanges,
+        bamParams=bamParams,rc=rc)
+    
+    # At this point we must apply the fraction parameter if <1. We choose this
+    # point in order not to restrict later usage of the read ranges and since it
+    # does not take much time to load into memory.
+    #if (fraction<1) {
+    #    newSize <- round(fraction*length(genomeRanges))
+    #    set.seed(preprocessParams$seed)
+    #    refIndex <- sort(sample(length(genomeRanges),newSize))
+    #    genomeRanges <- genomeRanges[refIndex]
+    #    if (type=="rnaseq")
+    #        helperRanges <- helperRanges[refIndex]
+    #    for (i in 1:length(input)) {
+    #        if (!is.null(input[[i]]$ranges)) {
+    #            newSize <- round(fraction*length(input[[i]]$ranges))
+    #            set.seed(preprocessParams$seed)
+    #            fracIndex <- sort(sample(length(input[[i]]$ranges),newSize))
+    #            input[[i]]$ranges <- input[[i]]$ranges[fracIndex]
+    #        }
+    #        if (!is.null(input[[i]]$coverage)) {
+    #            #if (!is.null(input[[i]]$coverage$center)) {
+    #            #    input[[i]]$coverage$center <- 
+    #            #        input[[i]]$coverage$center[refIndex]
+    #            #}
+    #            #else
+    #            input[[i]]$coverage <- input[[i]]$coverage[refIndex]
+    #        }
+    #        if (!is.null(input[[i]]$profile))
+    #            input[[i]]$profile <- input[[i]]$profile[refIndex,]
+    #    }
+    #}
+    if (fraction<1) {
+        newSize <- round(fraction*length(mainRanges))
+        set.seed(preprocessParams$seed)
+        refIndex <- sort(sample(length(mainRanges),newSize))
+        mainRanges <- mainRanges[refIndex]
+        for (i in 1:length(input)) {
+            if (!is.null(input[[i]]$ranges)) {
+                newSize <- round(fraction*length(input[[i]]$ranges))
+                set.seed(preprocessParams$seed)
+                fracIndex <- sort(sample(length(input[[i]]$ranges),newSize))
+                input[[i]]$ranges <- input[[i]]$ranges[fracIndex]
+            }
+            if (!is.null(input[[i]]$coverage))
+                input[[i]]$coverage <- input[[i]]$coverage[refIndex]
+            if (!is.null(input[[i]]$profile))
+                input[[i]]$profile <- input[[i]]$profile[refIndex,]
+        }
+    }
+
+    # Remove unwanted seqnames from reference ranges
+    chrs <- unique(unlist(lapply(input,function(x) {
+        if (x$format %in% c("bam","bed"))
+            return(as.character(runValue(seqnames(x$ranges))))
+        else if (x$format=="bigwig") {
+            if (!requireNamespace("rtracklayer"))
+                stop("R package rtracklayer is required to read and import ",
+                    "BigWig files!")
+            return(as.character(seqnames(seqinfo(BigWigFile(x$file)))))
+        }
+    })))
+    #if (type=="chipseq") {
+    #    keep <- which(as.character(seqnames(genomeRanges)) %in% chrs)
+    #    genomeRanges <- genomeRanges[keep]
+    #}
+    #else if (type=="rnaseq") {
+    #    keeph <- which(as.character(seqnames(helperRanges)) %in% chrs)
+    #    helperRanges <- helperRanges[keeph]
+    #    genomeRanges <- genomeRanges[names(helperRanges)]
+    #    ########################################################################
+    #    ## There must be an R bug with `lengths` here as although it runs in 
+    #    ## Rcmd, it does not pass package building or vignette kniting... But 
+    #    ## for the time being it seems that it is not needed as the name 
+    #    ## filtering works
+    #    #lens <- which(lengths(genomeRanges)==0)
+    #    #if (length(lens)>0)
+    #    #    genomeRanges[lens] <- NULL
+    #    ########################################################################
+    #}
+    if (type=="chipseq") {
+        keep <- which(as.character(seqnames(mainRanges)) %in% chrs)
+        mainRanges <- mainRanges[keep]
+    }
+    else if (type=="rnaseq") {
+        keeph <- which(as.character(seqnames(helperRanges)) %in% chrs)
+        helperRanges <- helperRanges[keeph]
+        mainRanges <- mainRanges[names(helperRanges)]
+        ########################################################################
+        ## There must be an R bug with `lengths` here as although it runs in 
+        ## Rcmd, it does not pass package building or vignette kniting... But 
+        ## for the time being it seems that it is not needed as the name 
+        ## filtering works
+        #lens <- which(lengths(genomeRanges)==0)
+        #if (length(lens)>0)
+        #    genomeRanges[lens] <- NULL
+        ########################################################################
+    }
+	
+    #if (type=="chipseq")
+    #    input <- coverageRef(input,genomeRanges,region,flank,strandedParams,
+    #        rc=rc)#,bamParams)
+    #else if (type=="rnaseq")
+    #    input <- coverageRnaRef(input,genomeRanges,helperRanges,flank,
+    #        strandedParams,rc=rc)#,bamParams)
+    if (type=="chipseq")
+        input <- coverageRef(input,mainRanges,strandedParams,rc=rc)
+    else if (type=="rnaseq") #{
+        #if (flank[1]==0 && flank[2]==0)
+        #    mainRnaRanges <- genomeRanges
+        #else {
+        #    mainRnaRanges <- tryCatch(
+        #        loadMainRnaRanges(genome,refdb,flank),
+        #        error=function(e) { # Insanely slow fallback switch
+        #            warning("The requested flanking regions are not ",
+        #                "compatible with any of the precalculated ones. They ",
+        #                "will be calculated on the fly which is a lenghty ",
+        #                "process. If you wish to use precalculated flanking ",
+        #                "regions, stop the execution and adjust the flanking ",
+        #                "parameter.",immediate.=TRUE)
+        #            getMainRnaRangesOnTheFly(helperRanges,flank,rc=rc)
+        #        },finally=""
+        #    )
+        #}
+        input <- coverageRnaRef(input,mainRanges,strandedParams,rc=rc)
+    #}
     # If normalization method is linear, we must adjust the coverages
     if (preprocessParams$normalize=="linear") {
         linFac <- calcLinearFactors(input,preprocessParams)
@@ -582,17 +699,27 @@ recoup <- function(
     if (region=="genebody")
         mustBin <- TRUE
     if (region=="custom") {
-        w <- width(genomeRanges)
+        #w <- width(genomeRanges)
+        w <- width(mainRanges)
         if (any(w!=w[1]))
             mustBin <- TRUE
     }
-    
     if (mustBin) {
         if (binParams$regionBinSize==0) {
             warning("Central region bin size not set for a region that must ",
                 "be binned! Setting to 1000...",immediate.=TRUE)
             binParams$regionBinSize <- 1000
         }
+    }
+    
+    # Chunking?
+    if (binParams$chunking) {
+        if (type=="chipseq")
+            binParams$chunks <- split(1:length(genomeRanges),
+                as.character(seqnames(genomeRanges)))
+        else if (type=="rnaseq")
+            binParams$chunks <- split(1:length(helperRanges),
+                as.character(seqnames(helperRanges)))
     }
     input <- profileMatrix(input,flank,binParams,rc)
     
@@ -700,7 +827,7 @@ recoup <- function(
                     #    binSize=binParams$forcedBinSize[1],
                     #    stat=binParams$sumStat,rc=rc)
                     right <- binCoverageMatrix(
-                        input[[n]]$coverage,binSize=forcedBinSize[1],
+                        input[[n]]$coverage,binSize=binParams$forcedBinSize[1],
                         stat=binParams$sumStat,
                         interpolation=binParams$interpolation,flank=flank,
                         where="downstream",rc=rc

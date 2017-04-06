@@ -88,6 +88,83 @@ buildAnnotationStore <- function(organisms,sources,
                     file=file.path(store.path,"summarized_exon.rda"),
                     compress=TRUE)
             }
+            
+            # Then pre-create a set of flanking regions because it takes ages
+            # if we do it on-the-fly (inefficient, for the time being, XXapply
+            # functions are very slow)
+            # Define flanking areas
+            flanks <- list(
+                "F500"=c(500,500),
+                "F1000"=c(1000,1000),
+                "F2000"=c(2000,2000),
+                "F5000"=c(5000,5000)
+            )
+            # Load helper ranges from gene file if it exists, otherwise stop
+            # and prompt user to rerun
+            if (!file.exists(file.path(store.path,"gene.rda")))
+                stop("Gene annotation for ",o," from ",s," is required in ",
+                    "order to build predefined regions for RNA-Seq (exon) ",
+                    "coverage calculations. Please rerun the ",
+                    "buildAnnotationStore function with appropriate parameters")
+            if (!file.exists(file.path(store.path,"summarized_exon.rda")))
+                stop("Summarized exon annotation for ",o," from ",s," is ",
+                    "required in order to build predefined regions for ",
+                    "RNA-Seq (exon) coverage calculations. Please rerun the ",
+                    "buildAnnotationStore function with appropriate parameters")
+            
+            gg <- load(file.path(store.path,"gene.rda"))
+            ee <- load(file.path(store.path,"summarized_exon.rda"))
+            helperRanges <- gene
+            genomeRanges <- sexon
+            genomeRanges <- genomeRanges[names(helperRanges)]
+            for (nf in names(flanks)) {
+                if (file.exists(file.path(store.path,paste0(
+                    "summarized_exon_",nf,".rda")))) {
+                    message("Summarized exon annotation for ",o," from ",s,
+                    " with flanking region ",nf," for RNA-Seq data has ",
+                    "already been created and will be skipped. If you wish to ",
+                    "recreate it choose forceDownload = TRUE.")
+                    next
+                }
+                message("Creating summarized exon flanking region ",nf)
+                f <- flanks[[nf]]
+                leftRanges <- getFlankingRanges(helperRanges,f[1],
+                    "upstream")
+                elementMetadata(leftRanges) <- 
+                    elementMetadata(leftRanges)[,c(2,1,3,4)]
+                names(elementMetadata(leftRanges))[1] <- "exon_id"
+                leftRanges <- as(leftRanges,"GRangesList")
+                
+                rightRanges <- getFlankingRanges(helperRanges,f[2],
+                    "downstream")
+                elementMetadata(rightRanges) <- 
+                        elementMetadata(rightRanges)[,c(2,1,3,4)]
+                names(elementMetadata(rightRanges))[1] <- "exon_id"
+                rightRanges <- as(rightRanges,"GRangesList")
+                
+                if (is.null(rc)) {
+                    # For some progress recording...
+                    #flankedSexon <- vector("list",length(sexon))
+                    flankedSexon <- GRangesList()
+                    for (i in 1:length(genomeRanges)) {
+                        if (i%%1000 == 0)
+                            message("  processed ",i," ranges")
+                        flankedSexon[[i]] <- c(
+                            leftRanges[[i]],
+                            genomeRanges[[i]],
+                            rightRanges[[i]]
+                        )
+                    }
+                }
+                else
+                    flankedSexon <- cmcmapply(c,leftRanges,genomeRanges,
+                        rightRanges,rc=rc)
+                #message("  converting to GRangesList")
+                #flankedSexon <- GRangesList(flankedSexon)
+                names(flankedSexon) <- names(genomeRanges)
+                save(flankedSexon,file=file.path(store.path,paste0(
+                    "summarized_exon_",nf,".rda")),compress=TRUE)
+            }
         }
     }
 }
@@ -441,8 +518,7 @@ getDataset <- function(org) {
     )
 }
 
-getValidChrs <- function(org)
-{
+getValidChrs <- function(org) {
     switch(org,
         hg18 = {
             return(c(
@@ -512,6 +588,82 @@ getValidChrs <- function(org)
                 "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
                 "chr17","chr18","chr2","chr3","chr4","chr5","chr6","chr7",
                 "chr8","chr9","chrX","chrY"
+            ))
+        }
+    )
+}
+
+getValidChrsWithMit <- function(org) {
+    switch(org,
+        hg18 = {
+            return(c(
+                "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
+                "chr17","chr18","chr19","chr2","chr20","chr21","chr22","chr3",
+                "chr4","chr5","chr6","chr7","chr8","chr9","chrX","chrY","chrM"
+            ))
+        },
+        hg19 = {
+            return(c(
+                "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
+                "chr17","chr18","chr19","chr2","chr20","chr21","chr22","chr3",
+                "chr4","chr5","chr6","chr7","chr8","chr9","chrX","chrY","chrM"
+            ))
+        },
+        hg38 = {
+            return(c(
+                "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
+                "chr17","chr18","chr19","chr2","chr20","chr21","chr22","chr3",
+                "chr4","chr5","chr6","chr7","chr8","chr9","chrX","chrY","chrM"
+            ))
+        },
+        mm9 = {
+            return(c(
+                "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
+                "chr17","chr18","chr19","chr2","chr3","chr4","chr5","chr6",
+                "chr7","chr8","chr9","chrX","chrY","chrM"
+            ))
+        },
+        mm10 = {
+            return(c(
+                "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
+                "chr17","chr18","chr19","chr2","chr3","chr4","chr5","chr6",
+                "chr7","chr8","chr9","chrX","chrY","chrM"
+            ))
+        },
+        rn5 = {
+            return(c(
+                "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
+                "chr17","chr18","chr19","chr2","chr3","chr4","chr5","chr6",
+                "chr7","chr8","chr9","chrX","chrM"
+            ))
+        },
+        dm3 = {
+            return(c(
+                "chr2L","chr2LHet","chr2R","chr2RHet","chr3L","chr3LHet",
+                "chr3R","chr3RHet","chr4","chrU","chrUextra","chrX","chrXHet",
+                "chrYHet"
+            ))
+        },
+        danrer7 = {
+            return(c(
+                "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
+                "chr17","chr18","chr19","chr2","chr20","chr21","chr22","chr23",
+                "chr24","chr25","chr3","chr4","chr5","chr6","chr7","chr8","chr9"
+            ))
+        },
+        pantro4 = {
+            return(c(
+                "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
+                "chr17","chr18","chr19","chr20","chr21","chr22","chr2A","chr2B",
+                "chr3","chr4","chr5","chr6","chr7","chr8","chr9","chrX","chrY",
+                "chrM"
+            ))
+        },
+        susscr3 = {
+            return(c(
+                "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
+                "chr17","chr18","chr2","chr3","chr4","chr5","chr6","chr7",
+                "chr8","chr9","chrX","chrY","chrM"
             ))
         }
     )

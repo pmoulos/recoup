@@ -13,8 +13,13 @@ Imports:
     BiocGenerics,
     biomaRt,
     circlize,
+    graphics,
+    grDevices,
+    methods,
     rtracklayer,
-    plyr
+    plyr,
+    stats,
+    utils
 Suggests:
     grid,
     GenomeInfoDb,
@@ -48,8 +53,8 @@ biocViews: Software, GeneExpression, Preprocessing, QualityControl,
 VignetteBuilder: knitr
 Authors@R: c(person(given="Panagiotis", family="Moulos",
     email="moulos@fleming.gr", role=c("aut", "cre")))
-Version: 1.3.0
-Date: 2016-04-02
+Version: 1.1.3
+Date: 2017-04-05
 Collate:
     'annotation.R'
     'argcheck.R'

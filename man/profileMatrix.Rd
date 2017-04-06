@@ -37,9 +37,7 @@ testGenomeRanges <- makeGRangesFromDataFrame(df=test.genome,
     keep.extra.columns=TRUE)
 test.input <- coverageRef(
     test.input, 
-    genomeRanges=testGenomeRanges, 
-    region="tss",
-    flank=c(2000,2000)
+    mainRanges=testGenomeRanges
 )
 test.input <- profileMatrix(
     test.input,

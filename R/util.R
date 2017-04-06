@@ -12,6 +12,10 @@ splitBySeqname <- function(gr,rc=NULL) {
     return(gr.list)
 }
 
+#splitBySeqname <- function(gr,rc=NULL) {
+#    return(split(gr,as.character(seqnames(gr))))
+#}
+
 splitVector <- function(x,n,interp,stat,seed=42) {
     isRle <- ifelse(is(x,"Rle"),TRUE,FALSE)
     if (length(x)<n) {
@@ -110,8 +114,8 @@ readConfig <- function(input) {
         stop("Input file ",files[bi]," does not exist! Please check paths...")
     }
     formats <- as.character(tab$format)
-    if (!all(formats %in% c("bam","bed")))
-        stop("Input formats must be one of \"bam\", \"bed\"")
+    if (!all(formats %in% c("bam","bed","bigwig")))
+        stop("Input formats must be one of \"bam\", \"bed\", \"bigwig\"")
     cls <- NULL
     if (!is.null(tab$color)) {
         cls <- as.character(tab$color)
@@ -282,7 +286,7 @@ sliceObj <- function(obj,i=NULL,j=NULL,k=NULL,dropPlots=FALSE,rc=NULL) {
         obj$data <- obj$data[k]
     }
     if (dropPlots)
-        obj$plots <- list(profile=NULL,heatmap=NULL)
+        obj$plots <- list(profile=NULL,heatmap=NULL,correlation=NULL)
     else {
         message("Recalculating profile plots after slicing...")
         if (obj$callopts$plotParams$profile) {
@@ -301,8 +305,141 @@ sliceObj <- function(obj,i=NULL,j=NULL,k=NULL,dropPlots=FALSE,rc=NULL) {
     return(obj)
 }
 
+# TODO: Check if the inputs have no names and work with indices
+# TODO: Check the callopts one by one. For example, there is the risk of 
+#       different organisms if we don't check for "organism".
+# TODO: Recalculate plots after merge
+# TODO: Write man page
+mergeRuns <- function(...,withDesign=c("auto","drop"),dropPlots=TRUE) {
+    tmp <- list(...)
+    withDesign <- tolower(withDesign[1])
+    
+    # Initialize new object
+    merged <- list()
+    
+    # Check design
+    if (withDesign == "auto") {
+        allHaveDesign <- all(sapply(tmp,function(x) !is.null(x$design)))
+        whichDesign <- sapply(tmp,function(x) is.null(x$design))
+        oneHasDesign <- ifelse(length(which(!whichDesign))==1,TRUE,FALSE)
+        noneHasDesign <- all(whichDesign)
+        if (noneHasDesign)
+            merged$design <- NULL
+        if (allHaveDesign) {
+            tryCatch({
+                # Will fail if some design has different number of columns
+                test1 <- 
+                    do.call("rbind",lapply(tmp,function(x) return(x$design)))
+                # Will fail if some design has different number of rows
+                test2 <- 
+                    do.call("cbind",lapply(tmp,function(x) return(x$design)))
+                # Will fail if some design has different row names
+                n1 <- sort(Reduce("intersect",
+                    lapply(tmp,function(x) return(rownames(x$design)))))
+                n2 <- sort(rownames(tmp[[1]]$design))
+                if (!identical(n1,n2))
+                    stop("Incompatible row names")
+                # Will fail if some design has different column names
+                n1 <- sort(Reduce("intersect",
+                    lapply(tmp,function(x) return(colnames(x$design)))))
+                n2 <- sort(colnames(tmp[[1]]$design))
+                if (!identical(n1,n2))
+                    stop("Incompatible column names")
+                
+                # If nothing fails, then assign the design to the new object
+                merged$design <- tmp[[1]]$design
+            },error=function(e) {
+                warning("Caught incompatible designs! Dropping design...",
+                    immediate.=TRUE)
+                message("----------")
+                print(e)
+                message("----------")
+                merged$design <- NULL
+            },
+            finally="")
+        }
+        if (oneHasDesign) # Apply to all
+            merged$design <- tmp[[which(whichDesign)]]$design
+        if (!noneHasDesign && !allHaveDesign && !oneHasDesign) { # Some have design...
+            # Gather them
+            designs <- lapply(tmp,function(x) {
+                if (!is.null(x$design))
+                    return(x$design)
+                else
+                    return(NULL)
+            })
+            
+            # ...and repeat the previous pattern
+            tryCatch({
+                # Will fail if some design has different number of columns
+                test1 <- do.call("rbind",designs)
+                # Will fail if some design has different number of rows
+                test2 <- do.call("cbind",designs)
+                # Will fail if some design has different row names
+                n1 <- sort(Reduce("intersect",
+                    lapply(designs,function(x) return(rownames(x)))))
+                n2 <- sort(rownames(designs[[1]]))
+                if (!identical(n1,n2))
+                    stop("Incompatible row names")
+                # Will fail if some design has different column names
+                n1 <- sort(Reduce("intersect",
+                    lapply(designs,function(x) return(colnames(x)))))
+                n2 <- sort(colnames(designs[[1]]))
+                if (!identical(n1,n2))
+                    stop("Incompatible column names")
+                
+                # If nothing fails, then assign the design to the new object
+                merged$design <- designs[[1]]
+            },error=function(e) {
+                warning("Caught incompatible designs! Dropping design...",
+                    immediate.=TRUE)
+                message("----------")
+                print(e)
+                message("----------")
+                merged$design <- NULL
+            },
+            finally="")
+        }
+    }
+    else if (withDesign=="drop")
+        merged$design <- NULL
+    
+    # Quick for now
+    merged$callopts <- tmp[[1]]$callopts
+    
+    # Try to merge actual data
+    newLen <- sum(sapply(tmp,function(x) return(length(x$data))))
+    merged$data <- vector("list",newLen)
+    theNames <- character(0)
+    for (i in 1:length(tmp))
+        theNames <- c(theNames,names(tmp[[i]]$data))
+    names(merged$data) <- theNames
+
+    for (m in tmp) {
+        for (n in names(m$data)) {
+            merged$data[[n]] <- m$data[[n]]
+            if (!is.null(merged$design)) {
+                if (!is.null(merged$data[[n]]$coverage))
+                    merged$data[[n]]$coverage <- 
+                        merged$data[[n]]$coverage[rownames(merged$design)]
+                if (!is.null(merged$data[[n]]$profile))
+                    merged$data[[n]]$profile <- 
+                        merged$data[[n]]$profile[rownames(merged$design),]
+            }
+        }
+    }
+    
+    # Drop all plots for now, later recalculate
+    if (dropPlots)
+        merged$plots <- list(profile=NULL,heatmap=NULL,correlation=NULL)
+    else
+        merged$plots <- NULL
+    
+    return(merged)
+}
+
 decideChanges <- function(input,currCall,prevCall) {
-    if (is.null(prevCall))
+	if (is.null(prevCall))
         return(input)
     # Check region and flank
     if (currCall$region != prevCall$region 
@@ -312,11 +449,11 @@ decideChanges <- function(input,currCall,prevCall) {
     if (currCall$binParams$flankBinSize != prevCall$binParams$flankBinSize
         || currCall$binParams$regionBinSize != prevCall$binParams$regionBinSize
         || currCall$binParams$sumStat != prevCall$binParams$sumStat
-        || currCall$binParams$smooth != prevCall$binParams$smooth
         || currCall$binParams$interpolation != prevCall$binParams$interpolation
         || currCall$binParams$forceHeatmapBinning != 
             prevCall$binParams$forceHeatmapBinning
-        || currCall$binParams$forcedBinSize != prevCall$binParams$forcedBinSize)
+        || currCall$binParams$forcedBinSize != prevCall$binParams$forcedBinSize
+        || currCall$binParams$chunking != prevCall$binParams$chunking)
         input <- removeData(input,"profile")
     if (currCall$preprocessParams$normalize != 
         prevCall$preprocessParams$normalize
@@ -373,12 +510,36 @@ cmclapply <- function(...,rc) {
         else {
             if (!missing(rc) && !is.null(rc))
                 ncores <- ceiling(rc*ncores)
+            else 
+                m <- FALSE
         }
     }
     if (m)
         return(mclapply(...,mc.cores=ncores,mc.set.seed=FALSE))
     else
         return(lapply(...))
+}
+
+cmcmapply <- function(...,rc) {
+    if (suppressWarnings(!requireNamespace("parallel")) 
+        || .Platform$OS.type!="unix")
+        m <- FALSE
+    else {
+        m <- TRUE
+        ncores <- parallel::detectCores()
+        if (ncores==1) 
+            m <- FALSE
+        else {
+            if (!missing(rc) && !is.null(rc))
+                ncores <- ceiling(rc*ncores)
+            else 
+                m <- FALSE
+        }
+    }
+    if (m)
+        return(mcmapply(...,mc.cores=ncores,mc.set.seed=FALSE))
+    else
+        return(mapply(...))
 }
 
 ssCI <- function(fit) {
@@ -405,11 +566,14 @@ getDefaultListArgs <- function(arg,design=NULL,genome=NULL) {
                 sumStat=c("mean","median"),
                 interpolation=c("auto","spline","linear","neighborhood"),
                 forceHeatmapBinning=TRUE,
-                forcedBinSize=c(50,200)
+                forcedBinSize=c(50,200),
+                chunking=FALSE
             ))
         },
         preprocessParams = {
             return(list(
+				fragLen=NA,
+				cleanLevel=c(0,1,2,3),
                 normalize=c("none","linear","downsample","sampleto"),
                 sampleTo=1e+6,
                 spliceAction=c("split","keep","remove"),
@@ -720,6 +884,23 @@ getBiotypes <- function(org) {
             return(c("miRNA","ncRNA","protein_coding","pseudogene","rRNA",
                 "snoRNA","snRNA","transposable_element","tRNA"))
         }
+    )
+}
+
+getUcscOrganism <- function(org) {
+    switch(org,
+        hg18 = { return("hg18") },
+        hg19 = { return("hg19") },
+        hg38 = { return("hg38") },
+        mm9 = { return("mm9") },
+        mm10 = { return("mm10") },
+        rn5 = { return("rn5") },
+        rn5 = { return("rn6") },
+        dm3 = { return("dm3") },
+        danrer7 = { return("danRer7") },
+        pantro4 = { return("panTro4") },
+        susscr3 = { return("susScr3") },
+        tair10 = { return("TAIR10") }
     )
 }
 

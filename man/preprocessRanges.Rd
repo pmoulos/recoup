@@ -2,8 +2,8 @@
 \alias{preprocessRanges}
 \title{Read and preprocess BAM/BED files to GRanges}
 \usage{
-    preprocessRanges(input, preprocessParams, 
-        bamParams = NULL, rc = NULL)
+    preprocessRanges(input, preprocessParams, genome, 
+		bamRanges=NULL, bamParams = NULL, rc = NULL)
 }
 \arguments{
     \item{input}{an input list as in \code{\link{recoup}} but
@@ -13,6 +13,13 @@
     \item{preprocessParams}{see the \code{preprocessParams} 
     argument in the main \code{\link{recoup}} function.}
     
+    \item{genome}{see the \code{genome} argument in the
+    main \code{\link{recoup}} function.}
+    
+    \item{bamRanges}{a \code{GRanges} object to mask the 
+    BAM/BED files to save time and space. If \code{NULL},
+    the whole file is read.}
+
     \item{bamParams}{see the \code{bamParams} argument in 
     the main \code{\link{recoup}} function.}
 
