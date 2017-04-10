@@ -35,6 +35,9 @@ data("recoup_test_data",package="recoup")
 # Do some work
 testGenomeRanges <- makeGRangesFromDataFrame(df=test.genome,
     keep.extra.columns=TRUE)
+w <- width(testGenomeRanges)
+testGenomeRanges <- promoters(testGenomeRanges,upstream=2000,downstream=0)
+testGenomeRanges <- resize(testGenomeRanges,width=w+4000)
 test.input <- coverageRef(
     test.input, 
     mainRanges=testGenomeRanges
@@ -43,7 +46,7 @@ test.input <- profileMatrix(
     test.input,
     flank=c(2000,2000),
     binParams=list(flankBinSize=50,regionBinSize=150,
-        sumStat="mean",smooth=TRUE),
+        sumStat="mean",interpolation="auto"),
     rc=0.5
 )
 }
