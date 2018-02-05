@@ -53,7 +53,7 @@ biocViews: Software, GeneExpression, Preprocessing, QualityControl,
 VignetteBuilder: knitr
 Authors@R: c(person(given="Panagiotis", family="Moulos",
     email="moulos@fleming.gr", role=c("aut", "cre")))
-Version: 1.7.0
+Version: 1.7.1
 Date: 2017-04-13
 Collate:
     'annotation.R'
