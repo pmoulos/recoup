@@ -209,7 +209,7 @@ included. Thus, this page along with the rest of the tutorial on how to create
 genomic profiles from ChIP-Seq or RNA-Seq data can be found either 
 [here](http://epigenomics.fleming.gr/~panos/recoup_tutorial) or in the wiki 
 `recoup` pages in 
-[github](https://github.com/pmoulos/recoup/wiki/Introduction-to-recoup)
+[github](https://github.com/pmoulos/recoup-local/wiki/Introduction-to-recoup)
 
 ## Important notes
 

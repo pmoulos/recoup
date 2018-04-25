@@ -102,3 +102,16 @@ NEW FEATURES
 BUG FIXES
     o Fixed some bugs when using external annotations and on-the-fly 
     calculations.
+
+
+CHANGES IN VERSION 1.7.2 (2018-04-25)
+-------------------------------------
+
+NEW FEATURES
+
+    o New faster annotation building system which keeps also versions. May
+    break older annotation stores. A rebuild is advised.
+    o More supported genomes
+BUG FIXES
+    o Fixed a bug resulting in profile bleeding when using a mask of ranges
+    from a BAM file.

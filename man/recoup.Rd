@@ -9,7 +9,10 @@
         region = c("genebody", "tss", "tes", "custom"),
         type = c("chipseq", "rnaseq"),
         genome = c("hg18", "hg19", "hg38", "mm9" ,"mm10",
-            "rn5", "dm3", "danrer7", "pantro4", "susscr3"),
+            "rn5", "rn6", "dm3", "dm6", "danrer7", "danrer10",
+            "pantro4", "pantro5", "susscr3", "susscr11", 
+            "ecucab2", "tair10"),
+        version = "auto",
         refdb = c("ensembl", "ucsc", "refseq"),
         flank = c(2000, 2000),
         fraction = 1,
@@ -31,8 +34,8 @@
         ),
         selector = NULL,
         preprocessParams = list(
-			fragLen = NA,
-			cleanLevel = c(0, 1, 2, 3),
+            fragLen = NA,
+            cleanLevel = c(0, 1, 2, 3),
             normalize = c("none", "linear", 
                 "downsample","sampleto"),
             sampleTo = 1e+6,
@@ -173,6 +176,11 @@
     when \code{region} is one of the above or 
     \code{"custom"}, \code{genome} can be a tab delimited 
     BED-like text file or a data frame.}
+    
+    \item{version}{the version of \code{genome} to use as
+    related to \code{source}. Either \code{"auto"} (default)
+    or a numeric value representing an Ensembl version or
+    the creation date of UCSC or RefSeq annotations.}
     
     \item{refdb}{one of \code{"ensembl"}, \code{"ucsc"} or 
     \code{"refseq"}. It will be used to retrieve genomic 
@@ -618,6 +626,25 @@
     When \code{genome} is one of the supported organisms,
     \code{recoup} takes care of the rest.
     
+    The \code{version} argument controls what annotation
+    version is used (when using local annotation after
+    having built a store with 
+    \code{\link{buildAnnotationStore}} or when downloading
+    on the fly). When "auto", it will use the latest
+    annotation version for the selected source. So, if
+    \code{source="ensembl"}, it will use the latest 
+    installed or available version for the specified
+    organism based on information retrieved from the
+    \code{biomaRt} package. For example, for
+    \code{organism="hg19"}, it will be \code{91} at
+    the point where this manual is written. If 
+    \code{source="refseq"}, \code{recoup} will
+    either use the latest downloaded annotation 
+    according to a timestamp in the directory structure
+    or download and use the latest tables from UCSC on
+    the fly. If an annotation version does not exist,
+    \code{recoup} will throw an error and exit.
+    
     When \code{region} is \code{"tss"}, the curve and 
     heatmap profiles are centered around the TSS of the
     (gene) regions provided with the \code{genome} 
@@ -798,17 +825,17 @@
     only linear normalization is supported as there is no
     information on raw reads. The \code{cleanLevel} field
     controls what filtering will be applied to the raw 
-	reads read from BAM/BED files prior to producing the 
-	signal track. It can have four values: \code{0} for no
-	read processing/filtering, (use reads as they are, no 
-	uniqueness and no removal of unlocalized regions 
-	and mitochondrial DNA reads, unless filtered by the 
-	user before using \code{recoup}), \code{1} for removing 
-	unlocalized regions (e.g. chrU, hap, random etc.), 
-	\code{2} for removing reads of level 1 plus 
-	mitochondrial reads (chrM) and \code{3} for removing 
-	reads of level 2 plus using unique reads only. The 
-	default is level \code{0} (no filtering).
+    reads read from BAM/BED files prior to producing the 
+    signal track. It can have four values: \code{0} for no
+    read processing/filtering, (use reads as they are, no 
+    uniqueness and no removal of unlocalized regions 
+    and mitochondrial DNA reads, unless filtered by the 
+    user before using \code{recoup}), \code{1} for removing 
+    unlocalized regions (e.g. chrU, hap, random etc.), 
+    \code{2} for removing reads of level 1 plus 
+    mitochondrial reads (chrM) and \code{3} for removing 
+    reads of level 2 plus using unique reads only. The 
+    default is level \code{0} (no filtering).
     
     Regarding the \code{heatmapFactor} option of 
     \code{plotParams}, it controls the color scale of the

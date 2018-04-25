@@ -22,6 +22,15 @@ preprocessRanges <- function(input,preprocessParams,genome,bamRanges=NULL,
     # Define the BAM ranges to read if present. If yes, files need to be sorted,
     # indexed etc.
     if (!is.null(bamRanges)) {
+		# BAM ranges must be extended by fragLen if fragLen, otherwise we lose
+		# reads falling in this small area which causes a signal drop artifact
+		# on the edges of the areas to plot coverage for
+		if (!is.na(preprocessParams$fragLen)) {
+			w <- width(bamRanges)
+            bamRanges <- promoters(bamRanges,upstream=preprocessParams$fragLen,
+				downstream=0)
+            bamRanges <- resize(bamRanges,width=w+2*preprocessParams$fragLen)
+		}
 		bi <- all(sapply(input,function(x) {
 			file.exists(paste0(x$file,".bai"))
 		}))
@@ -126,39 +135,54 @@ getMainRanges <- function(genomeRanges,helperRanges=NULL,type,region,flank,
     }
 }
 
-getMainRnaRangesOnTheFly <- function(helperRanges,flank,rc=NULL) {
+getMainRnaRangesOnTheFly <- function(genomeRanges,flank,rc=NULL) {
     message("Creating summarized exon flanking region ",flank[1]," bps and ",
         flank[2]," bps")
-    leftRanges <- getFlankingRanges(helperRanges,flank[1],"upstream")
-    elementMetadata(leftRanges) <- elementMetadata(leftRanges)[,c(2,1,3,4)]
-    names(elementMetadata(leftRanges))[1] <- "exon_id"
-    leftRanges <- as(leftRanges,"GRangesList")
-    rightRanges <- getFlankingRanges(helperRanges,flank[2],"downstream")
-    elementMetadata(rightRanges) <- elementMetadata(rightRanges)[,c(2,1,3,4)]
-    names(elementMetadata(rightRanges))[1] <- "exon_id"
-    rightRanges <- as(rightRanges,"GRangesList")
     if (is.null(rc)) {
         # For some progress recording...
-        flankedSexon <- GRangesList()
-        for (i in 1:length(genomeRanges)) {
-            if (i%%1000 == 0)
-                message("  processed ",i," ranges")
-            flankedSexon[[i]] <- c(
-                leftRanges[[i]],
-                genomeRanges[[i]],
-                rightRanges[[i]]
-            )
-        }
+        flankedSexon <- lapply(genomeRanges,flankFirstLast,
+			f[1],f[2],rc=rc)
     }
-    else {
-        # Dangerous... must issue warning
-        warning("Parallel creation of GRangesList object may cause a memory ",
-            "leak. Please monitor your system.",immediate.=TRUE)
-        flankedSexon <- cmcmapply(c,leftRanges,helperRanges,
-            rightRanges,rc=rc)
-    }
-    return(flankedSexon)
+    else
+        flankedSexon <- cmclapply(genomeRanges,flankFirstLast,
+			flank[1],flank[2],rc=rc)
+	message("Creating a GRangesList with the flanking regions")
+    return(GRangesList(flankedSexon))
 }
+
+#getMainRnaRangesOnTheFly <- function(helperRanges,flank,rc=NULL) {
+#    message("Creating summarized exon flanking region ",flank[1]," bps and ",
+#        flank[2]," bps")
+#    leftRanges <- getFlankingRanges(helperRanges,flank[1],"upstream")
+#    elementMetadata(leftRanges) <- elementMetadata(leftRanges)[,c(2,1,3,4)]
+#    names(elementMetadata(leftRanges))[1] <- "exon_id"
+#    leftRanges <- as(leftRanges,"GRangesList")
+#    rightRanges <- getFlankingRanges(helperRanges,flank[2],"downstream")
+#    elementMetadata(rightRanges) <- elementMetadata(rightRanges)[,c(2,1,3,4)]
+#    names(elementMetadata(rightRanges))[1] <- "exon_id"
+#    rightRanges <- as(rightRanges,"GRangesList")
+#    if (is.null(rc)) {
+#        # For some progress recording...
+#        flankedSexon <- GRangesList()
+#        for (i in 1:length(genomeRanges)) {
+#            if (i%%1000 == 0)
+#                message("  processed ",i," ranges")
+#            flankedSexon[[i]] <- c(
+#                leftRanges[[i]],
+#                genomeRanges[[i]],
+#                rightRanges[[i]]
+#            )
+#        }
+#    }
+#    else {
+#        # Dangerous... must issue warning
+#        warning("Parallel creation of GRangesList object may cause a memory ",
+#            "leak. Please monitor your system.",immediate.=TRUE)
+#        flankedSexon <- cmcmapply(c,leftRanges,helperRanges,
+#            rightRanges,rc=rc)
+#    }
+#    return(flankedSexon)
+#}
 
 getRegionalRanges <- function(ranges,region,flank) {
     switch(region,
@@ -199,13 +223,36 @@ resizeRanges <- function(ranges,fragLen,rc=NULL) {
 	if (!is.null(names(ranges)))
 		return(cmclapply(names(ranges),function(n,dat,fl) {
 			message("Resizing ",n," to ",fl," bases")
-			return(restrict(resize(dat[[n]],width=fl,fix="start")))
+			return(trim(resize(dat[[n]],width=fl,fix="start")))
 		},ranges,fragLen,rc=rc))
 	else
 		return(cmclapply(1:length(ranges),function(i,dat,fl) {
 			message("Resizing rangeset",i," to ",fl," bases")
-			return(restrict(resize(dat[[i]],width=fl,fix="start")))
+			return(trim(resize(dat[[i]],width=fl,fix="start")))
 		},ranges,fragLen,rc=rc))
+}
+
+flankFirstLast <- function(x,u,d) {
+	s <- as.character(strand(x[1]))
+	n <- length(x)
+	w1 <- width(x[1])
+	w2 <- width(x[n])
+	if (s=="+") {
+		x[1] <- promoters(x[1],upstream=u,downstream=0)
+		x[1] <- resize(x[1],width=w1+u)
+		x[n] <- resize(x[n],width=w2+d)
+	}
+    else if (s=="-") {
+		x[1] <- resize(x[1],width=w1+u)
+		x[n] <- promoters(x[n],upstream=d,downstream=0)
+		x[n] <- resize(x[n],width=w2+d)
+	}
+	else {
+		x[1] <- promoters(x[1],upstream=u,downstream=0)
+		x[1] <- resize(x[1],width=w1+u)
+		x[n] <- resize(x[n],width=w2+d)
+	}
+    return(x)
 }
 
 cleanRanges <- function(aRange,level,org) {

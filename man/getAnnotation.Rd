@@ -2,7 +2,8 @@
 \alias{getAnnotation}
 \title{Annotation downloader}
 \usage{
-    getAnnotation(org, type, refdb="ensembl", rc=NULL)
+    getAnnotation(org, type, refdb = "ensembl", ver = NULL,
+        rc = NULL)
 }
 \arguments{
     \item{org}{the organism for which to download
@@ -16,6 +17,10 @@
     \code{"ucsc"} or \code{"refseq"}. In the later two
     cases, an SQL connection is opened with the UCSC 
     public databases.}
+    
+    \item{ver}{the version of \code{org} to use as
+    related to \code{refdb} or \code{NULL} for latest
+    versions. See also the main \code{recoup} help page.}
 
     \item{rc}{fraction (0-1) of cores to use in a multicore 
     system. It defaults to \code{NULL} (no parallelization).
