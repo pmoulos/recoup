@@ -1,5 +1,5 @@
 coverageRef <- function(input,mainRanges,
-	strandedParams=list(strand=NULL,ignoreStrand=TRUE),rc=NULL) {
+    strandedParams=list(strand=NULL,ignoreStrand=TRUE),rc=NULL) {
     names(input) <- sapply(input,function(x) return(x$id))
     for (n in names(input)) {
         message("Calculating requested regions coverage for ",input[[n]]$name)

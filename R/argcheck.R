@@ -30,8 +30,12 @@ checkTextArgs <- function(arg.name,arg.value,arg.list,multiarg=FALSE) {
 checkNumArgs <- function(arg.name,arg.value,arg.type,arg.bounds,direction) {
     switch(arg.type,
         numeric = {
-            if (!is.numeric(arg.value))
-                stop(arg.name," parameter must be a numeric value!")
+            if (!is.numeric(arg.value)) {
+                # Can it be converted to numeric?
+                arg.value <- suppressWarnings(as.numeric(arg.value))
+                if (is.na(arg.value)) # No
+                    stop(arg.name," parameter must be a numeric value!")
+            }
             if (!missing(arg.bounds)) {
                 switch(direction,
                     both = {
@@ -71,8 +75,12 @@ checkNumArgs <- function(arg.name,arg.value,arg.type,arg.bounds,direction) {
             }
         },
         integer = {
-            if (!is.integer(arg.value))
-                stop(arg.name," parameter must be an integer!")
+            if (!is.integer(arg.value)) {
+                # Can it be converted to integer?
+                arg.value <- suppressWarnings(as.integer(arg.value))
+                if (is.na(arg.value)) # No
+                    stop(arg.name," parameter must be an integer value!")
+            }
             if (!missing(arg.bounds)) {
                 switch(direction,
                     both = {
@@ -245,8 +253,8 @@ validateListArgs <- function(what,arg.list) {
         },
         preprocessParams = {
             valid.1 <- names(arg.list) %in% c("fragLen","cleanLevel",
-				"normalize","sampleTo","spliceAction","spliceRemoveQ",
-				"bedGenome","seed")
+                "normalize","sampleTo","spliceAction","spliceRemoveQ",
+                "bedGenome","seed")
             not.valid.1 <- which(!valid.1)
             if (length(not.valid.1)>0) {
                 warning("The following ",what," argument names are invalid ",
@@ -258,15 +266,15 @@ validateListArgs <- function(what,arg.list) {
                 for (n in names(arg.list)) {
                     switch(n,
                         fragLen = {
-							if (!is.na(arg.list$fragLen))
-								checkNumArgs(
-									"The fragLen option of preprocessParams",
-									arg.list$fragLen,"numeric",0,"gt"
-								)
+                            if (!is.na(arg.list$fragLen))
+                                checkNumArgs(
+                                    "The fragLen option of preprocessParams",
+                                    arg.list$fragLen,"numeric",0,"gt"
+                                )
                         },
                         cleanLevel = {
-							arg.list$cleanLevel <- 
-								as.integer(arg.list$cleanLevel[1])
+                            arg.list$cleanLevel <- 
+                                as.integer(arg.list$cleanLevel[1])
                             checkNumArgs(
                                 "The cleanLevel option of preprocessParams",
                                 arg.list$cleanLevel,"integer",c(0,3),"botheq"
@@ -590,4 +598,9 @@ checkInput <- function(input) {
             stop("All input list members must have a format field! Member ",i,
                 " does not have one.")
     }
+}
+
+validateOrganismArg <- function(org) {
+    org <- tolower(org[1])
+    checkTextArgs("org",org,getSupportedOrganisms(),multiarg=FALSE)
 }

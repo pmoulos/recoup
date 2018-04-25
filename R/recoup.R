@@ -3,8 +3,10 @@ recoup <- function(
     design=NULL,
     region=c("genebody","tss","tes","custom"),
     type=c("chipseq","rnaseq"),
-    genome=c("hg18","hg19","hg38","mm9","mm10","rn5","dm3","danrer7","pantro4",
-        "susscr3"),
+    genome=c("hg18","hg19","hg38","mm9","mm10","rn5","rn6","dm3","dm6",
+        "danrer7","danrer10","pantro4","pantro5","susscr3","susscr11",
+        "ecucab2","tair10"),
+    version="auto",
     refdb=c("ensembl","ucsc","refseq"),
     flank=c(2000,2000),
     fraction=1,
@@ -27,8 +29,8 @@ recoup <- function(
     selector=NULL,
     #selector=getDefaultListArgs("selector"),
     preprocessParams=list(
-		fragLen=NA,
-		cleanLevel=c(0,1,2,3),
+        fragLen=NA,
+        cleanLevel=c(0,1,2,3),
         normalize=c("none","linear","downsample","sampleto"),
         sampleTo=1e+6,
         spliceAction=c("split","keep","remove"),
@@ -156,16 +158,22 @@ recoup <- function(
     if (!is.data.frame(genome) && file.exists(genome))
         checkFileArgs("genome",genome)
     else if (is.character(genome))
-        checkTextArgs("genome",genome,c("hg18","hg19","hg38","mm9","mm10","rn5",
-            "dm3","danrer7","pantro4","susscr3","tair10"),multiarg=FALSE)
-    checkTextArgs("refdb",refdb,c("ensembl","ucsc","refseq"),multiarg=FALSE)
+        checkTextArgs("genome",genome,getSupportedOrganisms(),multiarg=FALSE)
+    checkTextArgs("refdb",refdb,getSupportedRefDbs(),multiarg=FALSE)
     checkTextArgs("type",type,c("chipseq","rnaseq"),multiarg=FALSE)
     checkNumArgs("fraction",fraction,"numeric",c(0,1),"botheq")
     if (any(flank<0))
         stop("The minimum flanking allowed is 0 bp")
     if (any(flank>50000))
         stop("The maximum flanking allowed is 50000 bp")
-        
+    # Check the version argument
+    version <- version[1]
+    if (is.character(version)) {
+        version <- tolower(version)
+        checkTextArgs("version",version,c("auto"),multiarg=FALSE)
+    }
+    else
+        checkNumArgs("version",version,"numeric")
     # If type is rnaseq, only genebody plots are valid
     if (type=="rnaseq" && region!="genebody") {
         warning("When type is \"rnaseq\", plots can be created only on ",
@@ -175,11 +183,11 @@ recoup <- function(
     
     # If type is rnaseq, read extension is illegal because of potential splicing
     if (type=="rnaseq" && !is.null(preprocessParams$fragLen)
-		&& !is.na(preprocessParams$fragLen)) {
-		warning("When type is \"rnaseq\", read extension/reduction should not ",
+        && !is.na(preprocessParams$fragLen)) {
+        warning("When type is \"rnaseq\", read extension/reduction should not ",
             "happen because of potential splicing! Ignoring...",immediate.=TRUE)
-		preprocessParams$fragLen <- NA
-	}
+        preprocessParams$fragLen <- NA
+    }
     
     # and list arguments
     orderByDefault <- getDefaultListArgs("orderBy")
@@ -242,6 +250,8 @@ recoup <- function(
                 genome,
             refdb=if (is.null(thisCall$refdb)) prevCallParams$refdb else
                 refdb,
+            version=if (is.null(thisCall$version)) prevCallParams$version else
+                version,
             flank=if (is.null(thisCall$flank)) prevCallParams$flank else flank,
             fraction=if (is.null(thisCall$fraction)) prevCallParams$fraction
                 else fraction,
@@ -279,6 +289,7 @@ recoup <- function(
             region=region,
             type=type,
             genome=genome,
+            version=version,
             refdb=refdb,
             flank=flank,
             fraction=fraction,
@@ -308,6 +319,7 @@ recoup <- function(
     region=callParams$region
     type=callParams$type
     genome=callParams$genome
+    version=callParams$version
     refdb=callParams$refdb
     flank=callParams$flank
     fraction=callParams$fraction
@@ -341,38 +353,76 @@ recoup <- function(
         }
         else {
             # Check if local storage has been set
-            if (dir.exists(file.path(localDbHome,refdb,genome))) {
+            storageHome <- file.path(localDbHome,refdb,genome)
+            if (dir.exists(storageHome)) {
+                # Some compatibility with previous annoation stores
+                if ("gene.rda" %in% dir(storageHome)) { # Older version
+                    warning("Older annotation storage detected! Please ",
+                        "rebuild your annotation storage using the ",
+                        "buildAnnotationStore function\nso as to have the ",
+                        "ability of versioning genomic coordinate annotations.",
+                        "\nIn the future, older versions may become unusable.",
+                        immediate.=TRUE)
+                    storageHomeVersion <- storageHome
+                }
+                else { # Newer version
+                    # Decide on version
+                    if (version != "auto") {
+                        storageHomeVersion <- file.path(storageHome,version)
+                        if (!dir.exists(storageHomeVersion)) {
+                            warning("The annotation directory ",
+                                storageHomeVersion,
+                                " does not seem to exist! Have you run ",
+                                "buildAnnotationStorage? Will use newest ",
+                                "existing version.",immediate.=TRUE)
+                            version <- "auto"
+                        }
+                    }
+                    if (version == "auto") {
+                        vers <- suppressWarnings(as.numeric(dir(storageHome)))
+                        if (any(is.na(vers))) {
+                            of <- vers[which(is.na(vers))]
+                            stop("Corrupted annotation storage directory ",
+                                "contents! ->",of,"<- Either remove offending ",
+                                "files/directories or rebuild.")
+                        }
+                        vers <- sort(vers,decreasing=TRUE)
+                        version <- vers[1]
+                        storageHomeVersion <- file.path(storageHome,version)
+                    }
+                }
+                
                 if (type=="chipseq") {
-                    g <- load(file.path(localDbHome,refdb,genome,"gene.rda"))
+                    g <- load(file.path(storageHomeVersion,"gene.rda"))
                     genomeRanges <- gene
                     helperRanges <- NULL
                 }
                 else if (type=="rnaseq") {
                     # Load the helper ranges anyway
-                    g <- load(file.path(localDbHome,refdb,genome,"gene.rda"))
+                    g <- load(file.path(storageHomeVersion,"gene.rda"))
                     helperRanges <- gene
                     if (all(flank==0)) {
-                        g <- load(file.path(localDbHome,refdb,genome,
+                        g <- load(file.path(storageHomeVersion,
                             "summarized_exon.rda"))
                         genomeRanges <- sexon
                     }
                     else if (all(flank==500)) {
-                        g <- load(file.path(localDbHome,refdb,genome,
+                        g <- load(file.path(storageHomeVersion,
                             "summarized_exon_F500.rda"))
                         genomeRanges <- flankedSexon
                     }
                     else if (all(flank==1000)) {
-                        g <- load(file.path(localDbHome,refdb,genome,
+                        g <- load(file.path(storageHomeVersion,
                             "summarized_exon_F1000.rda"))
                         genomeRanges <- flankedSexon
                     }
                     else if (all(flank==2000)) {
-                        g <- load(file.path(localDbHome,refdb,genome,
+                        g <- load(file.path(storageHomeVersion,
                             "summarized_exon_F2000.rda"))
                         genomeRanges <- flankedSexon
                     }
                     else if (all(flank==5000)) {
-                        g <- load(file.path(localDbHome,refdb,genome,
+                        g <- load(file.path(storageHomeVersion,
                             "summarized_exon_F2000.rda"))
                         genomeRanges <- flankedSexon
                     }
@@ -404,15 +454,15 @@ recoup <- function(
                     )
                     names(helperRanges) <- as.character(helperRanges$gene_id)
                     genome <- getAnnotation(genome,"exon",refdb=refdb,rc=rc)
-                    ann.gr <- makeGRangesFromDataFrame(
+                    annGr <- makeGRangesFromDataFrame(
                         df=genome,
                         keep.extra.columns=TRUE,
                         seqnames.field="chromosome"
                     )
                     message("Merging exons")
-                    ann.gr <- reduceExons(ann.gr,rc=rc)
-                    names(ann.gr) <- as.character(ann.gr$exon_id)
-                    genomeRanges <- split(ann.gr,ann.gr$gene_id)
+                    annGr <- reduceExons(annGr,rc=rc)
+                    names(annGr) <- as.character(annGr$exon_id)
+                    genomeRanges <- split(annGr,annGr$gene_id)
                 }
             }
         }
@@ -644,7 +694,7 @@ recoup <- function(
         #    genomeRanges[lens] <- NULL
         ########################################################################
     }
-	
+    
     #if (type=="chipseq")
     #    input <- coverageRef(input,genomeRanges,region,flank,strandedParams,
     #        rc=rc)#,bamParams)
