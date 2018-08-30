@@ -30,7 +30,7 @@ Suggests:
     rmarkdown,
     zoo,
     RUnit,
-    BiocInstaller,
+    BiocManager,
     BSgenome,
     RSQLite,
     RMySQL
@@ -54,7 +54,7 @@ biocViews: Software, GeneExpression, Preprocessing, QualityControl,
 VignetteBuilder: knitr
 Authors@R: c(person(given="Panagiotis", family="Moulos",
     email="moulos@fleming.gr", role=c("aut", "cre")))
-Version: 1.9.0
+Version: 1.9.1
 Date: 2018-04-25
 Collate:
     'annotation.R'
