@@ -626,8 +626,8 @@ getBsOrganism <- function(org) {
 }
 
 loadBsGenome <- function(org) {
-    if (!requireNamespace("BiocInstaller"))
-        stop("The Bioconductor package BiocInstaller is required to ",
+    if (!requireNamespace("BiocManager"))
+        stop("The Bioconductor package BiocManager is required to ",
             "proceed!")
     if (!requireNamespace("BSgenome"))
         stop("The Bioconductor package BSgenome is required to ",
