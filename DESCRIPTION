@@ -49,12 +49,12 @@ Encoding: UTF-8
 LazyLoad: yes
 LazyData: yes
 URL: https://github.com/pmoulos/recoup
-biocViews: Software, GeneExpression, Preprocessing, QualityControl,
+biocViews: ImmunoOncology, Software, GeneExpression, Preprocessing, QualityControl,
     RNASeq, ChIPSeq, Sequencing, Coverage
 VignetteBuilder: knitr
 Authors@R: c(person(given="Panagiotis", family="Moulos",
     email="moulos@fleming.gr", role=c("aut", "cre")))
-Version: 1.11.0
+Version: 1.11.1
 Date: 2018-04-25
 Collate:
     'annotation.R'
