@@ -577,16 +577,16 @@ getBsOrganism <- function(org) {
             return("BSgenome.Dmelanogaster.UCSC.dm6")
         },
         danrer7 = {
-            #warning("danRer7 is not supported by BSgenome! Please use Ensembl ",
-            #    "as annotation source if GC content is important.",
+            #warning("danRer7 is not supported by BSgenome! Please use ",
+            #    "Ensembl as annotation source if GC content is important.",
             #    immediate.=TRUE)
             #return(NA)
             # Is default for refseq for some reason...
             return("BSgenome.Drerio.UCSC.danRer7")
         },
         danrer10 = {
-            #warning("danRer10 is not supported by BSgenome! Please use Ensembl",
-            #    " as annotation source if GC content is important.",
+            #warning("danRer10 is not supported by BSgenome! Please use ",
+            #    "Ensembl as annotation source if GC content is important.",
             #    immediate.=TRUE)
             #return(NA)
             #  Is default for refseq for some reason...
@@ -626,8 +626,8 @@ getBsOrganism <- function(org) {
 }
 
 loadBsGenome <- function(org) {
-    if (!requireNamespace("BiocInstaller"))
-        stop("The Bioconductor package BiocInstaller is required to ",
+    if (!requireNamespace("BiocManager"))
+        stop("The Bioconductor package BiocManager is required to ",
             "proceed!")
     if (!requireNamespace("BSgenome"))
         stop("The Bioconductor package BSgenome is required to ",
@@ -726,9 +726,9 @@ ucscToEnsembl <- function() {
     ))
 }
 
-getBiotypes <- function(a) {
-    return(as.character(unique(a$biotype)))
-}
+#getBiotypes <- function(a) {
+#    return(as.character(unique(a$biotype)))
+#}
 
 getHostOld <- function(org) {
     .Deprecated("getHost")
@@ -2294,25 +2294,25 @@ getUcscQuery <- function(org,type,refdb="ucsc") {
                                 "knownToRefSeq.value=refFlat.name GROUP BY ",
                                 "`transcript_id` ORDER BY `chromosome`,`start`",
                                 sep=""))
-                            # Should be the same as hg19 but is like hg18
-                            #return(paste("SELECT knownCanonical.chrom AS ",
-                            #    "`chromosome`,`chromStart` AS `start`,",
-                            #    "`chromEnd` AS `end`,`transcript` AS ",
-                            #    "`transcript_id`,0 AS `gc_content`,",
-                            #    "knownGene.strand AS `strand`,`geneName` AS ",
-                            #    "`gene_name`,`geneType` AS `biotype` FROM ",
-                            #    "`knownCanonical` INNER JOIN `knownGene` ON ",
-                            #    "knownCanonical.transcript=knownGene.name ",
-                            #    "INNER JOIN `knownToRefSeq` ON ",
-                            #    "knownCanonical.transcript=knownToRefSeq.name ",
-                            #    "INNER JOIN `knownToEnsembl` ON ",
-                            #    "knownCanonical.transcript=knownToEnsembl.name",
-                            #    " INNER JOIN `transMapEnsemblV4` ON ",
-                            #    "knownToEnsembl.value=transMapEnsemblV4.geneId ",
-                            #    "INNER JOIN `refFlat` ON ",
-                            #    "knownToRefSeq.value=refFlat.name GROUP BY ",
-                            #    "`transcript_id` ORDER BY `chromosome`, `start`",
-                            #    sep=""))
+                        # Should be the same as hg19 but is like hg18
+                        #return(paste("SELECT knownCanonical.chrom AS ",
+                        #    "`chromosome`,`chromStart` AS `start`,",
+                        #    "`chromEnd` AS `end`,`transcript` AS ",
+                        #    "`transcript_id`,0 AS `gc_content`,",
+                        #    "knownGene.strand AS `strand`,`geneName` AS ",
+                        #    "`gene_name`,`geneType` AS `biotype` FROM ",
+                        #    "`knownCanonical` INNER JOIN `knownGene` ON ",
+                        #    "knownCanonical.transcript=knownGene.name ",
+                        #    "INNER JOIN `knownToRefSeq` ON ",
+                        #    "knownCanonical.transcript=knownToRefSeq.name ",
+                        #    "INNER JOIN `knownToEnsembl` ON ",
+                        #    "knownCanonical.transcript=knownToEnsembl.name",
+                        #    " INNER JOIN `transMapEnsemblV4` ON ",
+                        #    "knownToEnsembl.value=transMapEnsemblV4.geneId ",
+                        #    "INNER JOIN `refFlat` ON ",
+                        #    "knownToRefSeq.value=refFlat.name GROUP BY ",
+                        #    "`transcript_id` ORDER BY `chromosome`, `start`",
+                        #    sep=""))
                         },
                         mm9 = {
                             return(paste("SELECT knownCanonical.chrom AS ",

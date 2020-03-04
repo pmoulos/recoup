@@ -81,10 +81,8 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
     # Attach some config options for profile and heatmap. irrespectively of 
     # subsequent plotting
     ggplotParams <- recoupObj$callopts$ggplotParams
-    lineSize <- ifelse(
-        recoupObj$callopts$plotParams$device %in% c("x11","png","jpg","bmp"),
-        0.7,0.6
-    )
+    lineSize <- ifelse(any(recoupObj$callopts$plotParams$device 
+            %in% c("x11","png","jpg","bmp")),0.7,0.6)
     ggplotParams$lineSize <- lineSize
     ggplotParams$singleFacet <- recoupObj$callopts$plotParams$singleFacet
     ggplotParams$multiFacet <- recoupObj$callopts$plotParams$multiFacet
@@ -289,7 +287,7 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
                     strip.text.x=ggParams$strip.text.x,
                     strip.text.y=ggParams$strip.text.y,
                     legend.position=ggParams$legend.position,
-                    panel.margin=ggParams$panel.margin) +
+                    panel.spacing=ggParams$panel.spacing) +
                 scale_x_continuous(breaks=breaks,labels=labels)
 
             if (!is.null(profileColors))
@@ -370,7 +368,7 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
                     strip.text.x=ggParams$strip.text.x,
                     strip.text.y=ggParams$strip.text.y,
                     legend.position=ggParams$legend.position,
-                    panel.margin=ggParams$panel.margin) +
+                    panel.spacing=ggParams$panel.spacing) +
                 scale_x_continuous(breaks=breaks,labels=labels)
             
              if (!is.null(profileColors) && ggParams$singleFacet!="none") 
@@ -605,10 +603,8 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
     # Attach some config options for profile and heatmap. irrespectively of 
     # subsequent plotting
     ggplotParams <- recoupObj$callopts$ggplotParams
-    lineSize <- ifelse(
-        recoupObj$callopts$plotParams$device %in% c("x11","png","jpg","bmp"),
-        0.7,0.6
-    )
+    lineSize <- ifelse(any(recoupObj$callopts$plotParams$device %in% 
+        c("x11","png","jpg","bmp")),0.7,0.6)
     ggplotParams$lineSize <- lineSize
     ggplotParams$singleFacet <- recoupObj$callopts$plotParams$singleFacet
     ggplotParams$multiFacet <- recoupObj$callopts$plotParams$multiFacet
@@ -842,7 +838,7 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
                     strip.text.x=ggParams$strip.text.x,
                     strip.text.y=ggParams$strip.text.y,
                     legend.position=ggParams$legend.position,
-                    panel.margin=ggParams$panel.margin)
+                    panel.spacing=ggParams$panel.spacing)
 
             if (!is.null(profileColors))
                 ggplot.plot <- ggplot.plot + 
@@ -919,7 +915,7 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
                     strip.text.x=ggParams$strip.text.x,
                     strip.text.y=ggParams$strip.text.y,
                     legend.position=ggParams$legend.position,
-                    panel.margin=ggParams$panel.margin)
+                    panel.spacing=ggParams$panel.spacing)
             
              if (!is.null(profileColors) && ggParams$singleFacet!="none") 
                 ggplot.plot <- ggplot.plot + 

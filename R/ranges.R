@@ -86,7 +86,7 @@ preprocessRanges <- function(input,preprocessParams,genome,bamRanges=NULL,
         downsample = {
             libSizes <- lengths(ranges)
             downto = min(libSizes)
-            set.seed(preprocessParams$seed)
+            #set.seed(preprocessParams$seed)
             downsampleIndex <- lapply(libSizes,function(x,s) {
                 return(sort(sample(x,s)))
             },downto)
@@ -98,7 +98,7 @@ preprocessRanges <- function(input,preprocessParams,genome,bamRanges=NULL,
             }
         },
         sampleto = {
-            set.seed(preprocessParams$seed)
+            #set.seed(preprocessParams$seed)
             libSizes <- lengths(ranges)
             downsampleIndex <- lapply(libSizes,function(x,s) {
                 if (s>x) s <- x
@@ -256,24 +256,25 @@ flankFirstLast <- function(x,u,d) {
 }
 
 cleanRanges <- function(aRange,level,org) {
+    # Need to convert seqnames to character because %in% does not work...
     if (level==1) {
         chrs <- getValidChrsWithMit(org)
-        aRange <- aRange[seqnames(aRange) %in% chrs]
-        newsi <- which(seqlevels(aRange) %in% chrs)
+        aRange <- aRange[as.character(seqnames(aRange)) %in% chrs]
+        newsi <- which(as.character(seqlevels(aRange)) %in% chrs)
         seqlevels(aRange) <- seqlevels(aRange)[newsi]
         seqinfo(aRange) <- seqinfo(aRange)[seqlevels(aRange)]
     }
     else if (level==2) {
         chrs <- getValidChrs(org)
-        aRange <- aRange[seqnames(aRange) %in% chrs]
-        newsi <- which(seqlevels(aRange) %in% chrs)
+        aRange <- aRange[as.character(seqnames(aRange)) %in% chrs]
+        newsi <- which(as.character(seqlevels(aRange)) %in% chrs)
         seqlevels(aRange) <- seqlevels(aRange)[newsi]
         seqinfo(aRange) <- seqinfo(aRange)[seqlevels(aRange)]
     }
     else if (level==3) {
         chrs <- getValidChrs(org)
-        aRange <- aRange[seqnames(aRange) %in% chrs]
-        newsi <- which(seqlevels(aRange) %in% chrs)
+        aRange <- aRange[as.character(seqnames(aRange)) %in% chrs]
+        newsi <- which(as.character(seqlevels(aRange)) %in% chrs)
         seqlevels(aRange) <- seqlevels(aRange)[newsi]
         seqinfo(aRange) <- seqinfo(aRange)[seqlevels(aRange)]
         aRange <- unique(aRange)
@@ -304,6 +305,38 @@ readBam <- function(bam,sa=c("keep","remove","split"),sq=0.75,params=NULL) {
         },
         remove = {
             reads <- trim(as(readGAlignments(file=bam,param=params),"GRanges"))
+            qu <- quantile(width(reads),sq)
+            rem <- which(width(reads)>qu)
+            if (length(rem)>0)
+                reads <- reads[-rem]
+            message("  Excluded ",length(rem)," reads")
+            return(reads)
+        }
+    )
+}
+
+readBamIntervals <- function(bam,gr,sa=c("keep","remove","split"),sq=0.75,
+    params=NULL) {
+    sa = sa[1]
+    checkTextArgs("sa",sa,c("keep","remove","split"),multiarg=FALSE)
+    checkNumArgs("sq",sq,"numeric",c(0,1),"botheq")
+    bamIndex <- paste(bam,"bai",sep=".")
+    if (is.null(params))
+        params <- ScanBamParam(which=gr)
+    else
+        bamWhich(params) <- gr
+    switch(sa,
+        keep = {
+            return(as(readGAlignments(file=bam,index=bamIndex,
+                param=params,with.which_label=TRUE),"GRanges"))
+        },
+        split = {
+            return(unlist(grglist(readGAlignments(file=bam,
+                index=bamIndex,param=params,with.which_label=TRUE))))
+        },
+        remove = {
+            reads <- as(readGAlignments(file=bam.file,index=bamIndex,
+                param=params,with.which_label=TRUE),"GRanges")
             qu <- quantile(width(reads),sq)
             rem <- which(width(reads)>qu)
             if (length(rem)>0)
@@ -345,4 +378,346 @@ prepareBam <- function(i,input) {
         message("Indexing BAM file ",input[[i]]$file)
         indexBam(input[[i]]$file)
     },finally="")
+}
+
+splitRanges <- function(x,n,type=c("variable","fixed"),flank=NULL,where=NULL) {
+    if (!is(x,"GRanges"))
+        stop("x must be a GRanges object!")
+    
+    type <- type[1]
+    if (!is.null(flank)) {
+        switch(where,
+            center = {
+                x <- narrow(x,start=flank[1]+1,width=width(x)-flank[1]-flank[2])
+            },
+            upstream = {
+                x <- resize(x,width=flank[1],fix="start")
+            },
+            downstream = {
+                x <- resize(x,width=flank[2],fix="end")
+            }
+        )
+    }
+    
+    # There is the possibility that some reference ranges are trimmed, where the
+    # flanking regions will be slighlty smaller. Still, since binning is 
+    # mandatory with the non-coverage approach, this will have practically no
+    # effect to general profiles.
+    message("  getting areas for profiling")
+    if (type == "fixed") {
+        windows <- tileRanges(x,n)
+        windows <- windows[names(x)]
+    }
+    else if (type == "variable") { # Dynamic
+        # sqrt function provides better width distribution than log and of
+        # course better than natural scale. For better results we also exlcude
+        # width extremes
+        message("  creating dynamic bins")
+        w <- width(x)
+        qs <- quantile(w,c(0.01,0.99))
+        w[w<=qs[1]] <- qs[1]
+        w[w>=qs[2]] <- qs[2]
+        cutFac <- cut(sqrt(w),breaks=n,labels=1:n)
+        #cutFac <- cut(w,breaks=n,labels=1:n)
+        #cutFac <- cut(log(w),breaks=n,labels=1:n)
+        cutFacFreq <- table(cutFac)
+        zeroFreq <- which(cutFacFreq==0)
+        if (length(zeroFreq) > 0)
+            cutFacFreq <- cutFacFreq[-zeroFreq]
+        binSizes <- as.numeric(names(cutFacFreq))
+        windows <- cmclapply(binSizes,function(i,B,Y) {
+            return(tileRanges(Y[which(B==i)],i))
+        },cutFac,x,rc=rc)
+        message("  getting final areas for profiling")
+        windows <- do.call("c",windows)
+        windows <- windows[names(x)]
+    }
+    return(windows)
+}
+
+splitRangesList <- function(x,n,type=c("variable","fixed"),flank=NULL,
+    where=NULL,rc=NULL) {
+    if (!is(x,"GRangesList"))
+        stop("x must be a GRangesList object!")
+    
+    type <- type[1]
+    # Store the order, will be needed later
+    theOrder <- names(x)
+    
+    # lapply over large GRangesList is insanely slow
+    message("  getting elements to bin")
+    if (!is.null(flank)) {
+        # Collapse the GRangesList
+        y <- suppressWarnings(trim(unlist(x)))
+        # Since the list contents are fixed recoup annotation elements, we can
+        # use a dirty solution of grepping specific strings to get indices
+        # corresponding to areas we want
+        switch(where,
+            center = {
+                centerIndex <- grep("MEX_",names(y))
+                x <- y[centerIndex]
+            },
+            upstream = {
+                flankIndex <- grep("MEX_",names(y),invert=TRUE)
+                ii <- seq(from=1,to=length(flankIndex),by=2)
+                x <- y[flankIndex[ii]]
+                theTiles <- splitRanges(x,n)
+                # They have wrong names
+                names(theTiles) <- 
+                    sapply(strsplit(names(x),".",fixed=TRUE),function(x) { 
+                        return(x[1]) 
+                    })
+                return(theTiles)
+            },
+            downstream = {
+                flankIndex <- grep("MEX_",names(y),invert=TRUE)
+                ii <- seq(from=2,to=length(flankIndex),by=2)
+                x <- y[flankIndex[ii]]
+                theTiles <- splitRanges(x,n)
+                # They have wrong names
+                names(theTiles) <- 
+                    sapply(strsplit(names(x),".",fixed=TRUE),function(x) { 
+                        return(x[1]) 
+                    })
+                return(theTiles)
+            }
+        )
+    }
+    
+    # Resplit and reorder
+    geme <- strsplit(names(x),".",fixed=TRUE)
+    genes <- sapply(geme,function(x) {
+        return(x[1])
+    })
+    names(x) <- sapply(geme,function(x) {
+        return(x[2])
+    })
+    tmp <- split(x,genes)
+    tmp <- tmp[theOrder]
+    
+    # Now, in the case of exons, we must bin each exon according to its length
+    # and the number of bins must add to n, so we must construct a binning
+    # scheme which is proportional to the exon lengths
+    message("  creating proportional bin sizes")
+    wList <- width(tmp) # IntegerList
+    if (type == "fixed")
+        w <- lapply(wList,fixedRangedBinSizes,n)
+    else {
+        prew <- sum(wList)
+        qs <- quantile(prew,c(0.01,0.99))
+        prew[prew<=qs[1]] <- qs[1]
+        prew[prew>=qs[2]] <- qs[2]
+        N <- as.numeric(cut(sqrt(prew),breaks=n,labels=1:n))
+        w <- cmclapply(1:length(N),variableRangedBinSizes,wList,N,rc=rc)
+    }
+    
+    # Correct the contents of tmp (GRangesList) by getting the offending genes
+    # from w above through the flag list member and remove the exons that can't
+    # be binned because of the allowed number of bins
+    message("  veryfiying the bin sizes (may take a few minutes)")
+    flagInd <- which(sapply(w,function(a) return(a$flag)))
+    for (i in flagInd) { # How many can they be...
+        message("    veryfying ",i)
+        gr <- GRangesList(tmp[[i]][w[[i]]$exonsToUse])
+        names(gr) <- names(tmp[i])
+        tmp[i] <- gr
+        # Never attempt again a usage of the '[[' operator in GRangesList...
+        # This also means that we never should use lapply methods... Better
+        # unlist and re-list using split and some factor like we do here.
+        # https://support.bioconductor.org/p/77300/#77447
+    }
+    # Now unlist tmp...
+    Y <- unlist(tmp)
+    # ...and get the bin size vectors
+    W <- unlist(lapply(w,function(a) {
+        return(a$binSize)
+    }),use.names=FALSE)
+    names(W) <- names(Y)
+    
+    # Create a hash of bin sizes and then apply the tileRanges function with
+    # n=member_of_table. It should runs faster and in the end combine the 
+    # GRangesLists with "c" and reorder according to original names
+    message("  creating the actual bins")
+    hash <- table(W)
+    binSizes <- as.numeric(names(hash))
+    # Consider cmclapply
+    theTiles <- cmclapply(binSizes,function(i,W,Y) {
+        return(tileRanges(Y[which(W==i)],i))
+    },W,Y,rc=rc)
+    theTiles <- do.call("c",theTiles)
+    theTiles <- theTiles[names(Y)]
+    
+    # Now unlist the tiles and recombine to a new GRangesList based on gene ids
+    message("  fixing bin and bin collection names")
+    theTiles <- unlist(theTiles)
+    # Took a little bit more than expected, until changed the pattern to "." (we
+    # don't need a regex) and fixed=TRUE
+    # FIXME: The split approach won't work properly with UCSC accessions as
+    # they contain dots (.). We need to figure this out.
+    tileGenes <- sapply(strsplit(names(theTiles),".",fixed=TRUE),function(x) {
+        return(x[1])
+    })
+    # We need only the gene names in the end, the tiles must be anonymous
+    theTiles <- unname(theTiles)
+    # ...and this should conclude
+    message("  getting final areas for profiling")
+    theTiles <- split(theTiles,tileGenes)
+    theTiles <- theTiles[theOrder]
+    
+    #    len <- length(gr)
+    #    if (n - len < len) # Sample w/o replacement
+    #        ts <- sample(gr,n-len)
+    #    else
+    #        ts <- sample(gr,n-len,replace=TRUE)
+    
+    return(theTiles)
+    
+    # This is the final first version of this function. After this, for the
+    # genes that have <n or >n bins, the following heuristics will be applied
+    # after after calculating the overlaps, rpm etc.
+    # <n: Interpolate on the measurement up to n
+    # >n: Interpolate on the measurement down to n
+}
+
+tileRanges <- function(x,n) {
+    # Perform the tiling operation
+    # 1. Find widths of potentially resized ranges
+    w <- width(x)
+    # 2. Find those potentially smaller than number of bins
+    offending <- which(w<n)
+    rest <- which(w>=n)
+    # 3. Tile the rest
+    if (length(rest) > 0)
+        restWindows <- tile(x[rest],n=n)
+    else
+        restWindows <- GRangesList()
+    # 4. Tile the offending by the minimum of their width minus 1bp so as to 
+    #    avoid problems with later interpolation
+    if (length(offending) > 0)
+        offendingWindows <- tile(x[offending],n=min(w))
+    else
+        offendingWindows <- GRangesList()
+    # 5. Merge and restore original order
+    windows <- c(restWindows,offendingWindows)
+    ord <- sort(c(rest,offending),index.return=TRUE)
+    windows <- windows[ord$ix]
+    names(windows) <- names(x)
+    return(windows)
+}
+
+fixedRangedBinSizes <- function(x,n) {
+    # Firstly, if a gene has >n exons, we should downsample to n, by sorting
+    # acording to length, selecting the first n longest ones and assign a 
+    # unit bin size to each of them. Otherwise we end up with a lot of 
+    # 0-sized bins which cannot be handled by the heuristics below. We also
+    # store a flag so as to determine which indices are offending, get the
+    # names and apply the coresponding indices directly to the initial 
+    # GRangesList, otherwise very slow...
+    if (length(x) == 1 && x < n)
+        return(list(binSize=x,exonsToUse=1,flag=FALSE))
+    if (length(x) > n) {
+         s <- sort(x,decreasing=TRUE,index.return=TRUE)
+         j <- sort(s$ix[1:n])
+         return(list(binSize=rep(1,n),exonsToUse=j,flag=TRUE))
+    }
+    sumLen <- sum(x)
+    binSize <- round(x*n/sumLen)
+    if (any(binSize==0))
+        binSize[binSize==0] <- 1
+    check <- sum(binSize)
+    if (check > n) {
+        # Randomly subtract, but protect agains zero by removing from the
+        # sampling space, bins of size 1
+        d <- check - n
+        nonOneInds <- 1:length(binSize)
+        sizeOne <- which(binSize==1)
+        if (length(sizeOne) > 0)
+            nonOneInds <- which(binSize > 1)
+        # nonOneInds is the protected sampling space, however it may end 
+        # smaller than the number of bins to become smaller... In that case
+        # we remove 2 from the remaining largest bins, unless the remaining
+        # largest bins are of length 2 where in this case we have to remove
+        # 1... aargh... or we simply eradicate remaining exons in this case
+        # after all this as they will not be informative anyway and flag.
+        lnoi <- length(nonOneInds)
+        if (lnoi < d) {
+            dd <- d - lnoi
+            ss <- sort(binSize[nonOneInds],decreasing=TRUE,
+                index.return=TRUE)
+            removeSize <- rep(1,lnoi)
+            removeSize[ss$ix[1:dd]] <- 2
+            binSize[nonOneInds] <- binSize[nonOneInds] - removeSize
+            if (any(binSize[nonOneInds]==0)) {
+                ze <- which(binSize==0)
+                exonsToUse <- 1:length(binSize)
+                binSize <- binSize[-ze]
+                exonsToUse <- exonsToUse[-ze]
+                return(list(binSize=binSize,exonsToUse=exonsToUse,
+                    flag=TRUE))
+            }
+        }
+        else {
+            ii <- sample(nonOneInds,d)
+            binSize[ii] <- binSize[ii] - 1
+        }
+    }
+    else if (check < n) {
+        # Randomly add, in this case there is no risk of letting a 0-size
+        # bin go, as the minimum bin size is one from above check
+        d <- n - check
+        ii <- sample(length(binSize),d)
+        binSize[ii] <- binSize[ii] + 1
+    }
+    return(list(binSize=binSize,exonsToUse=1:length(binSize),flag=FALSE))
+}
+
+variableRangedBinSizes <- function(i,w,n) {
+    x <- w[[i]]
+    if (length(x) == 1 && x < n[i])
+        return(list(binSize=x,exonsToUse=1,flag=FALSE))
+    if (length(x) > n[i]) {
+         s <- sort(x,decreasing=TRUE,index.return=TRUE)
+         j <- sort(s$ix[1:n[i]])
+         return(list(binSize=rep(1,n[i]),exonsToUse=j,flag=TRUE))
+    }
+    sumLen <- sum(x)
+    binSize <- round(x*n[i]/sumLen)
+    if (any(binSize==0))
+        binSize[binSize==0] <- 1
+    check <- sum(binSize)
+    if (check > n[i]) {
+        d <- check - n[i]
+        nonOneInds <- 1:length(binSize)
+        sizeOne <- which(binSize==1)
+        if (length(sizeOne) > 0)
+            nonOneInds <- which(binSize > 1)
+        lnoi <- length(nonOneInds)
+        if (lnoi < d) {
+            dd <- d - lnoi
+            ss <- sort(binSize[nonOneInds],decreasing=TRUE,
+                index.return=TRUE)
+            removeSize <- rep(1,lnoi)
+            removeSize[ss$ix[1:dd]] <- 2
+            binSize[nonOneInds] <- binSize[nonOneInds] - removeSize
+            if (any(binSize[nonOneInds]==0)) {
+                print("WTF")
+                ze <- which(binSize==0)
+                exonsToUse <- 1:length(binSize)
+                binSize <- binSize[-ze]
+                exonsToUse <- exonsToUse[-ze]
+                return(list(binSize=binSize,exonsToUse=exonsToUse,
+                    flag=TRUE))
+            }
+        }
+        else {
+            ii <- sample(nonOneInds,d)
+            binSize[ii] <- binSize[ii] - 1
+        }
+    }
+    else if (check < n[i]) {
+        d <- n[i] - check
+        ii <- sample(length(binSize),d)
+        binSize[ii] <- binSize[ii] + 1
+    }
+    return(list(binSize=binSize,exonsToUse=1:length(binSize),flag=FALSE))
 }

@@ -1,62 +1,98 @@
-splitBySeqname <- function(gr,rc=NULL) {
-    #message("Splitting input regions by seqname...")
-    gr.list <- cmclapply(levels(seqnames(gr)),function(x,lib) {
-        #message("  ",x)
-        tmp <- lib[seqnames(lib)==x]
-        if (length(tmp)>0) return(tmp) else return(NULL)
-    },gr,rc=rc)
-    names(gr.list) <- levels(seqnames(gr))
-    null <- which(sapply(gr.list,is.null))
-    if (length(null)>0)
-        gr.list <- gr.list[-null]
-    return(gr.list)
-}
-
 #splitBySeqname <- function(gr,rc=NULL) {
-#    return(split(gr,as.character(seqnames(gr))))
+#    #message("Splitting input regions by seqname...")
+#    grList <- cmclapply(levels(seqnames(gr)),function(x,lib) {
+#        #message("  ",x)
+#        tmp <- lib[seqnames(lib)==x]
+#        if (length(tmp)>0) return(tmp) else return(NULL)
+#    },gr,rc=rc)
+#    names(grList) <- levels(seqnames(gr))
+#    null <- which(sapply(grList,is.null))
+#    if (length(null)>0)
+#        grList <- grList[-null]
+#    return(grList)
 #}
 
-splitVector <- function(x,n,interp,stat,seed=42) {
+contVector <- function(x,size=NULL,flank=NULL,where=NULL) {
+    if (!is.null(flank)) {
+        switch(where,
+            upstream = {
+                size <- flank[1]
+                if (is(x,"Rle") && !is.na(runValue(x)))
+                    x <- x[1:flank[1]]
+                else
+                    return(rep(0,size))
+            },
+            downstream = {
+                size <- flank[2]
+                if (is(x,"Rle") && !is.na(runValue(x)))
+                    x <- x[(length(x)-flank[2]+1):length(x)]
+                else
+                    return(rep(0,size))
+            }
+        )
+    }
+    else {
+        if (!is(x,"Rle") || all(is.na(runValue(x))))
+            return(rep(0,size))
+    }
+    return(as.numeric(x))
+}
+
+splitVector <- function(x,n,flank,where,interp,stat) {
     isRle <- ifelse(is(x,"Rle"),TRUE,FALSE)
+    if (!is.null(flank)) {
+        switch(where,
+            center = {
+                if (is(x,"Rle") && all(!is.na(runValue(x))))
+                    x <- x[(flank[1]+1):(length(x)-flank[2])]
+                else
+                    return(rep(0,n))
+            },
+            upstream = {
+                if (is(x,"Rle") && all(!is.na(runValue(x))))
+                    x <- x[1:flank[1]]
+                else
+                    return(rep(0,n))
+            },
+            downstream = {
+                if (is(x,"Rle") && all(!is.na(runValue(x))))
+                    x <- x[(length(x)-flank[2]+1):length(x)]
+                else
+                    return(rep(0,n))
+            }
+        )
+    }
+    else {
+        if (!is(x,"Rle") || all(is.na(runValue(x))))
+            return(rep(0,n))
+    }
     if (length(x)<n) {
         if (isRle)
             x <- as.numeric(x)
-        switch(interp,
-            auto = {
-                d <- (n-length(x))/n
-                if (d < 0.2) { # Then quite safe for neighborhood method
-                    y <- rep(NA,n)
-                    set.seed(seed)
-                    y[1:2] <- x[1:2]
-                    y[(n-1):n] <- x[(length(x)-1):length(x)]
-                    orig.pos <- sort(sample(3:(n-2),length(x)-4))
-                    y[orig.pos] <- x[3:(length(x)-2)]
-                    na <- which(is.na(y))
-                    avinds <- lapply(na,function(z) {
-                        return(c(z-2,z-1,z+1,z+2))
-                    })
-                    xx <- unlist(lapply(avinds,function(ii,yy) {
-                        return(mean(yy[ii],na.rm=TRUE))
-                    },y))
-                    y[na] <- xx
-                    x <- y
-                }
-                else { # Spline is the safest
-                    x <- spline(x,n=n)$y
-                    x[x<0] <- 0
-                }
-            },
-            spline = {
-                x <- spline(x,n=n)$y
-                x[x<0] <- 0
-            },
-            inear = {
-                x <- approx(x,n=n)$y
-                x[x<0] <- 0
-            },
-            neighborhood = {
+        x <- interpolateSignal(x,n,interp)
+        if (isRle)
+            x <- Rle(x)
+    }
+    binSize <- floor(length(x)/n)
+    dif <- length(x) - binSize*n 
+    binFac <- rep(binSize,n)
+    # Random bin increase size to avoid problems
+    add <- sample(1:n,dif)
+    binFac[add] <- binFac[add]+1
+    f <- factor(rep(1:n,binFac))
+    #S <- split(x,f)
+    #return(llply(S,stat))
+    S <- split(1:length(x),f)
+    s <- sapply(S,function(x) x[1])
+    return(aggregate(x,FUN=stat,start=s,width=binFac))
+}
+
+interpolateSignal <- function(x,n,interp) {
+    switch(interp,
+        auto = {
+            d <- (n-length(x))/n
+            if (d < 0.2) { # Then quite safe for neighborhood method
                 y <- rep(NA,n)
-                set.seed(seed)
                 y[1:2] <- x[1:2]
                 y[(n-1):n] <- x[(length(x)-1):length(x)]
                 orig.pos <- sort(sample(3:(n-2),length(x)-4))
@@ -71,21 +107,50 @@ splitVector <- function(x,n,interp,stat,seed=42) {
                 y[na] <- xx
                 x <- y
             }
-        )
-        if (isRle)
-            x <- Rle(x)
-    }
-    bin.size <- floor(length(x)/n)
-    dif <- length(x) - bin.size*n 
-    bin.fac <- rep(bin.size,n)
-    # Random bin increase size to avoid problems
-    set.seed(seed)
-    add <- sample(1:n,dif)
-    bin.fac[add] <- bin.fac[add]+1
-    f <- factor(rep(1:n,bin.fac))
-    #return(split(x,f))
-    S <- split(x,f)
-    return(llply(S,stat))
+            else { # Spline is the safest
+                x <- spline(x,n=n)$y
+                x[x<0] <- 0
+            }
+        },
+        spline = {
+            x <- spline(x,n=n)$y
+            x[x<0] <- 0
+        },
+        linear = {
+            x <- approx(x,n=n)$y
+            x[x<0] <- 0
+        },
+        neighborhood = {
+            y <- rep(NA,n)
+            y[1:2] <- x[1:2]
+            y[(n-1):n] <- x[(length(x)-1):length(x)]
+            orig.pos <- sort(sample(3:(n-2),length(x)-4))
+            y[orig.pos] <- x[3:(length(x)-2)]
+            na <- which(is.na(y))
+            avinds <- lapply(na,function(z) {
+                return(c(z-2,z-1,z+1,z+2))
+            })
+            xx <- unlist(lapply(avinds,function(ii,yy) {
+                return(mean(yy[ii],na.rm=TRUE))
+            },y))
+            y[na] <- xx
+            x <- y
+        }
+    )
+    return(x)
+}
+
+covLengthsEqual <- function(rl) {
+    if (is(rl,"RleList") || is(rl,"list"))
+        len <- lengths(rl)
+    else if (is(rl,"GRanges"))
+        len <- width(rl)
+    else if (is(rl,"GRangesList"))
+        len <- sapply(width(rl),sum)
+    z <- which(len==1)
+    if (length(z)>0)
+        len <- len[-z]
+    return(ifelse(all(len==len[1]),TRUE,FALSE))
 }
 
 readConfig <- function(input) {
@@ -177,7 +242,7 @@ kmeansDesign <- function(input,design=NULL,kmParams) {
             message("Performing k-means (k=",kmParams$k,") clustering using ",
                 "the ",input[[kmParams$reference]]$name," sample profile as ",
                 "reference")
-            set.seed(kmParams$seed)
+            #set.seed(kmParams$seed)
             kcl <- kmeans(input[[kmParams$reference]]$profile,
                 centers=kmParams$k,iter.max=kmParams$iterMax,
                 nstart=kmParams$nstart,algorithm=kmParams$algorithm)
@@ -197,6 +262,54 @@ kmeansDesign <- function(input,design=NULL,kmParams) {
             rownames(design) <- names(kmorder)
         }
     }
+    return(design)
+}
+
+# Experimental! Not working properly at the moment.
+# In the final version, the design variable should be replaced by an "obj"
+# variable. The obj can be a recoup list object (with design stored) or a design
+# data frame
+reorderClusters <- function(design,newOrder) {
+    # Check if newOrder is numeric
+    if (!is.numeric(newOrder))
+        stop("newOrder must be numeric")
+    # Check if design is a data frame
+    if (!is.data.frame(design))
+        stop("design must be a recoup design data frame!")
+    # Check if design is a proper clutering design
+    if (!("kcluster" %in% names(design)))
+        stop("design must hold clustering information! Are you sure you run ",
+            "kmeansDesign first?")
+    # Check correct number of clusters in new order
+    if (length(newOrder) != length(unique(as.character(design$kcluster))))
+        stop("The number of clusters in the new order vector does not match ",
+            "with the existing one!")
+    
+    # Do job
+    cur <- as.character(design$kcluster)
+    # They are of the form Cluster X (YYY)
+    spl <- strsplit(cur," ")
+    num <- as.numeric(sapply(spl,function(x) return(x[2])))
+    
+    # Before going furher, check that newOrder contains the same clusters
+    unum <- unique(num)
+    poff <- intersect(unum,newOrder)
+    if (length(poff) != length(unique(num)))
+        stop("The provided clusters are not the same as in design! Cluster ",
+            setdiff(newOrder,unum)," not found in design.")
+    
+    # Proceed
+    car <- sapply(spl,function(x) return(x[3]))
+    
+    names(newOrder) <- 1:length(newOrder)
+    
+    # Finally, reorder
+    newClus <- num
+    for (i in unum)
+        newClus[num==i] <- newOrder[as.character(i)]
+    
+    design$kcluster <- paste("Cluster",newClus,car)
+    
     return(design)
 }
 
@@ -309,7 +422,6 @@ sliceObj <- function(obj,i=NULL,j=NULL,k=NULL,dropPlots=FALSE,rc=NULL) {
 # TODO: Check the callopts one by one. For example, there is the risk of 
 #       different organisms if we don't check for "organism".
 # TODO: Recalculate plots after merge
-# TODO: Write man page
 mergeRuns <- function(...,withDesign=c("auto","drop"),dropPlots=TRUE) {
     tmp <- list(...)
     withDesign <- tolower(withDesign[1])
@@ -360,7 +472,8 @@ mergeRuns <- function(...,withDesign=c("auto","drop"),dropPlots=TRUE) {
         }
         if (oneHasDesign) # Apply to all
             merged$design <- tmp[[which(whichDesign)]]$design
-        if (!noneHasDesign && !allHaveDesign && !oneHasDesign) { # Some have design...
+        # Some have design...
+        if (!noneHasDesign && !allHaveDesign && !oneHasDesign) {
             # Gather them
             designs <- lapply(tmp,function(x) {
                 if (!is.null(x$design))
@@ -464,8 +577,8 @@ decideChanges <- function(input,currCall,prevCall) {
         || currCall$preprocessParams$spliceRemoveQ != 
         prevCall$preprocessParams$spliceRemoveQ
         || currCall$preprocessParams$spliceRemoveQ != 
-        prevCall$preprocessParams$spliceRemoveQ
-        || currCall$preprocessParams$seed != prevCall$preprocessParams$seed)
+        prevCall$preprocessParams$spliceRemoveQ)
+        #|| currCall$preprocessParams$seed != prevCall$preprocessParams$seed)
         input <- removeData(input,c("ranges","coverage","profile"))
         
         return(input)
@@ -520,28 +633,6 @@ cmclapply <- function(...,rc) {
         return(lapply(...))
 }
 
-cmcmapply <- function(...,rc) {
-    if (suppressWarnings(!requireNamespace("parallel")) 
-        || .Platform$OS.type!="unix")
-        m <- FALSE
-    else {
-        m <- TRUE
-        ncores <- parallel::detectCores()
-        if (ncores==1) 
-            m <- FALSE
-        else {
-            if (!missing(rc) && !is.null(rc))
-                ncores <- ceiling(rc*ncores)
-            else 
-                m <- FALSE
-        }
-    }
-    if (m)
-        return(mcmapply(...,mc.cores=ncores,mc.set.seed=FALSE))
-    else
-        return(mapply(...))
-}
-
 ssCI <- function(fit) {
     res <- (fit$yin - fit$y)/(1-fit$lev)
     sigma <- sqrt(var(res))
@@ -565,9 +656,11 @@ getDefaultListArgs <- function(arg,design=NULL,genome=NULL) {
                 regionBinSize=0,
                 sumStat=c("mean","median"),
                 interpolation=c("auto","spline","linear","neighborhood"),
+                binType=c("variable","fixed"),
                 forceHeatmapBinning=TRUE,
                 forcedBinSize=c(50,200),
-                chunking=FALSE
+                chunking=FALSE#,
+                #seed=42
             ))
         },
         preprocessParams = {
@@ -578,10 +671,11 @@ getDefaultListArgs <- function(arg,design=NULL,genome=NULL) {
                 sampleTo=1e+6,
                 spliceAction=c("split","keep","remove"),
                 spliceRemoveQ=0.75,
-                bedGenome=ifelse(!is.null(genome) && genome %in% c("hg18",
-                    "hg19","hg38","mm9","mm10","rn5","dm3","danrer7","pantro4",
-                    "susscr3"),genome,NA),
-                seed=42
+                #bedGenome=ifelse(!is.null(genome) && genome %in% c("hg18",
+                #    "hg19","hg38","mm9","mm10","rn5","dm3","danrer7","pantro4",
+                #    "susscr3"),genome,NA),
+                bedGenome=NA#,
+                #seed=42
             ))
         },
         selector = {
@@ -634,8 +728,8 @@ getDefaultListArgs <- function(arg,design=NULL,genome=NULL) {
                 nstart=20,
                 algorithm=c("Hartigan-Wong","Lloyd","Forgy","MacQueen"),
                 iterMax=20,
-                reference=NULL,
-                seed=42
+                reference=NULL#,
+                #seed=42
             ))
         }
     )
@@ -711,7 +805,7 @@ setr <- function(obj,key,value=NULL) {
                 obj$design <- key[[n]]
             },
             profile = {
-                if (!all(class(key[[n]])==c("gg","ggplot"))) {
+                if (!is(key[[n]],"gg") && !is(key[[n]],"ggplot")) {
                     warning("The supplied profile plot is not a ggplot ",
                         "object! Ignoring...",immediate.=TRUE)
                     return(obj)
@@ -719,7 +813,7 @@ setr <- function(obj,key,value=NULL) {
                 obj$plots$profile <- key[[n]]
             },
             heatmap = {
-                if (class(key[[n]])!=c("HeatmapList")) {
+                if (!is(key[[n]],"HeatmapList")) {
                     warning("The supplied heatmap plot is not a Heatmap ",
                         "object! Ignoring...",immediate.=TRUE)
                     return(obj)
@@ -727,7 +821,7 @@ setr <- function(obj,key,value=NULL) {
                 obj$plots$heatmap <- key[[n]]
             },
             correlation = {
-                if (!all(class(key[[n]])==c("gg","ggplot"))) {
+                if (!is(key[[n]],"gg") && !is(key[[n]],"ggplot")) {
                     warning("The supplied correlation plot is not a ggplot ",
                         " object! Ignoring...",immediate.=TRUE)
                     return(obj)
@@ -830,3 +924,81 @@ areColors <- function(x) {
             error=function(e) FALSE)
     }))
 }
+
+################################################################################
+
+# Legacy functions
+
+#splitVectorOld <- function(x,n,interp,stat,seed=42) {
+#    isRle <- ifelse(is(x,"Rle"),TRUE,FALSE)
+#    if (length(x)<n) {
+#        if (isRle)
+#            x <- as.numeric(x)
+#        switch(interp,
+#            auto = {
+#                d <- (n-length(x))/n
+#                if (d < 0.2) { # Then quite safe for neighborhood method
+#                    y <- rep(NA,n)
+#                    set.seed(seed)
+#                    y[1:2] <- x[1:2]
+#                    y[(n-1):n] <- x[(length(x)-1):length(x)]
+#                    orig.pos <- sort(sample(3:(n-2),length(x)-4))
+#                    y[orig.pos] <- x[3:(length(x)-2)]
+#                    na <- which(is.na(y))
+#                    avinds <- lapply(na,function(z) {
+#                        return(c(z-2,z-1,z+1,z+2))
+#                    })
+#                    xx <- unlist(lapply(avinds,function(ii,yy) {
+#                        return(mean(yy[ii],na.rm=TRUE))
+#                    },y))
+#                    y[na] <- xx
+#                    x <- y
+#                }
+#                else { # Spline is the safest
+#                    x <- spline(x,n=n)$y
+#                    x[x<0] <- 0
+#                }
+#            },
+#            spline = {
+#                x <- spline(x,n=n)$y
+#                x[x<0] <- 0
+#            },
+#            linear = {
+#                x <- approx(x,n=n)$y
+#                x[x<0] <- 0
+#            },
+#            neighborhood = {
+#                y <- rep(NA,n)
+#                set.seed(seed)
+#                y[1:2] <- x[1:2]
+#                y[(n-1):n] <- x[(length(x)-1):length(x)]
+#                orig.pos <- sort(sample(3:(n-2),length(x)-4))
+#                y[orig.pos] <- x[3:(length(x)-2)]
+#                na <- which(is.na(y))
+#                avinds <- lapply(na,function(z) {
+#                    return(c(z-2,z-1,z+1,z+2))
+#                })
+#                xx <- unlist(lapply(avinds,function(ii,yy) {
+#                    return(mean(yy[ii],na.rm=TRUE))
+#                },y))
+#                y[na] <- xx
+#                x <- y
+#            }
+#        )
+#        if (isRle)
+#            x <- Rle(x)
+#    }
+#    binSize <- floor(length(x)/n)
+#    dif <- length(x) - binSize*n 
+#    binFac <- rep(binSize,n)
+#    # Random bin increase size to avoid problems
+#    set.seed(seed)
+#    add <- sample(1:n,dif)
+#    binFac[add] <- binFac[add]+1
+#    f <- factor(rep(1:n,binFac))
+#    #S <- split(x,f)
+#    #return(llply(S,stat))
+#    S <- split(1:length(x),f)
+#    s <- sapply(S,function(x) x[1])
+#    return(aggregate(x,FUN=stat,start=s,width=binFac))
+#}

@@ -3,12 +3,9 @@
 \title{Calculate coverage in a set of reference genomic 
     regions (RNA-Seq or spliced mode)}
 \usage{
-    coverageRnaRef(
-        input, 
-        mainRanges,
+    coverageRnaRef( input, mainRanges,
         strandedParams = list(strand=NULL, ignoreStrand=TRUE),
-        rc = NULL
-    )
+        rc = NULL)
 }
 \arguments{
     \item{input}{an input list as in \code{\link{recoup}} but
@@ -29,6 +26,8 @@
     Same as input with the \code{ranges} fields filled.
 }
 \description{
+    *This function is deprecated! Please use
+    \code{\link{coverageRef}}.*
     This function fills the \code{coverage} field in the
     main \code{input} argument in \code{\link{recoup}} 
     function.
@@ -47,7 +46,7 @@ data("recoup_test_data",package="recoup")
 # Calculate coverages
 testGenomeRanges <- makeGRangesFromDataFrame(df=test.genome,
     keep.extra.columns=TRUE)
-test.input <- coverageRnaRef(
+test.input <- coverageRef(
     test.input,
     mainRanges=test.exons
 )

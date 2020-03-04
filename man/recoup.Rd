@@ -8,6 +8,7 @@
         design = NULL,
         region = c("genebody", "tss", "tes", "custom"),
         type = c("chipseq", "rnaseq"),
+        signal = c("coverage", "rpm"),
         genome = c("hg18", "hg19", "hg38", "mm9" ,"mm10",
             "rn5", "rn6", "dm3", "dm6", "danrer7", "danrer10",
             "pantro4", "pantro5", "susscr3", "susscr11", 
@@ -28,6 +29,7 @@
             sumStat = c("mean", "median"),
             interpolation = c("auto", "spline", "linear", 
                 "neighborhood"),
+            binType = c("variable", "fixed"),
             forceHeatmapBinning = TRUE,
             forcedBinSize = c(50, 200),
             chunking = FALSE
@@ -41,8 +43,7 @@
             sampleTo = 1e+6,
             spliceAction = c("split", "keep", "remove"),
             spliceRemoveQ = 0.75,
-            bedGenome = NA,
-            seed = 42
+            bedGenome = NA
         ),
         plotParams = list(
             plot = TRUE,
@@ -79,8 +80,7 @@
             algorithm = c("Hartigan-Wong", 
                 "Lloyd", "Forgy", "MacQueen"),
             iterMax = 20,
-            reference = NULL,
-            seed = 42
+            reference = NULL
         ),
         strandedParams = list(
             strand = NULL, 
@@ -101,7 +101,7 @@
             strip.text.y = element_text(size = 10, 
                 face = "bold"),
             legend.position = "bottom",
-            panel.margin = grid::unit(1, "lines")
+            panel.spacing = grid::unit(1, "lines")
         ),
         complexHeatmapParams = list(
             main = list(
@@ -165,6 +165,10 @@
     \code{"genebody"}, \code{"custom"}.}
     
     \item{type}{one of \code{"chipseq"}, \code{"rnaseq"}.}
+    
+    \item{signal}{plots signal based on coverage 
+    (\code{"coverage"} default) or reads per million 
+    \code{"rpm"} (experimental!).}
     
     \item{genome}{when \code{region} is \code{"tss"}, 
     \code{"tes"} or \code{"genebody"}, \code{genome} can be 
@@ -247,6 +251,9 @@
         \code{"auto"} (default), \code{"spline"}, 
         \code{"linear"} or \code{"neighborhood"}. See 
         Details for further explanations of each option.
+        \item \code{binType}: the type of bins (variable
+        or fixed) when \code{signal="rpm"}. It defaults to 
+        \code{"variable"}. See Details for further info.
         \item \code{forceHeatmapBinning}: if \code{TRUE}
         (default) and the profile resolution is very high
         (see \code{flankBinSize} and \code{regionBinSize}
@@ -320,10 +327,6 @@
         genomes, as when reading from bed files, 
         chromosomal lenghts are not available and must
         be retrieved with another way.
-        \item \code{seed}: seed for random number 
-        generation to be used when \code{spliceAction} is 
-        \code{"downsample"} or \code{"sampleto"}. See 
-        Details for further explanations. Defaults to 42.
     }}
 
     \item{plotParams}{a named list whose members control
@@ -473,7 +476,6 @@
         the latter, all the profile matrices are merged 
         into one big matrix and k-means clustering is 
         performed on that matrix.
-        \item \code{seed}: See \code{\link{kmeans}}.
     }
     The result of k-means clustering will be appended to
     \code{design} as an additional field. If \code{design}
@@ -769,7 +771,26 @@
     extended vector, \code{"spline"} is used, otherwise
     \code{"neighborhood"}. None of the above is applied 
     to regions of equal length as there is no need for 
-    that.
+    that. Furthermore, the parameter \code{binType}
+    within the same parameter group controls the type
+    of bins that a genomic interval should be split to
+    in order to effectively calculate realistic signals
+    when \code{signal="rpm"}. When \code{"variable"}, the 
+    number of bins that each genomic interval is split to 
+    is proportional to the square root of its size (the 
+    square root smooths the region length distribution, 
+    otherwise many regions e.g. in the set of human 
+    genes/transcripts will end up in unit-size bins even 
+    though they can support larger resolutions). The final 
+    signal is interpolated to a length of 
+    \code{regionBinSize} or \code{flankBinSize} to 
+    produce the final plots. When \code{"fixed"}, the 
+    genomic intervals are "pushed" to have 
+    \code{regionBinSize} or \code{flankBinSize} bins, but 
+    if the areas are not large enought, they may end-up to 
+    many unit-size bins which will inflate and oversmooth 
+    the signal. It may give better results if the regions 
+    where the profile is to be created are all large enough.
     
     Regarding the usage of \code{selector$id} field, this
     requires some careful usage, as if the ids present 
@@ -792,13 +813,9 @@
     \code{"downsample"}, all libraries are downsampled to
     the minimum library size among samples. When 
     \code{"sampleto"}, all libraries are downsampled to
-    a fixed number of reads. The \code{"seed"} field is
-    used to define a seed for the generation of the random
-    indices of reads to be removed for downsampling. It
-    is required for reproducible results. The 
-    \code{sampleTo} field of \code{preprocessParams}
-    tells recoup the fixed number of reads to downsample
-    all libraries when 
+    a fixed number of reads. The \code{sampleTo} field
+    of \code{preprocessParams} tells recoup the fixed number 
+    of reads to downsample all libraries when 
     \code{preprocessParams$normalize="sampleTo"}. It 
     defaults to 1 million reads (\code{1e+6}). The 
     \code{spliceAction} field of \code{preprocessParams} is

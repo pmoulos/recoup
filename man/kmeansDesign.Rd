@@ -49,7 +49,7 @@ test.tss <- recoup(
 
 # Re-design based on k-means
 kmParams=list(k=2,nstart=20,algorithm="MacQueen",iterMax=20,
-    reference=NULL,seed=42)
+    reference=NULL)
 design <- kmeansDesign(test.tss$data,kmParams=kmParams)
 }
 \author{

@@ -1,6 +1,6 @@
 checkMainArgs <- function(main.args) {
     in.args <- names(main.args)[-1] # 1st member name of calling function
-    valid.args <- c("input","design","region","type","genome","refdb",
+    valid.args <- c("input","design","region","type","signal","genome","refdb",
         "flank","fraction","orderBy","binParams","selector","preprocessParams",
         "plotParams","saveParams","kmParams","strandedParams","ggplotParams",
         "complexHeatmapParams","bamParams","onTheFly","localDbHome","rc")
@@ -8,7 +8,7 @@ checkMainArgs <- function(main.args) {
     if (length(invalid) > 0) {
         for (i in 1:length(invalid))
             warning("Unknown input argument to recoup function: ",invalid[i],
-                " ...Ignoring...",now=TRUE)
+                " ...Ignoring...",immediate.=TRUE)
     }
 }
 
@@ -175,8 +175,8 @@ validateListArgs <- function(what,arg.list) {
         },
         binParams = {
             valid.1 <- names(arg.list) %in% c("flankBinSize","regionBinSize",
-                "sumStat","interpolation","forceHeatmapBinning","forcedBinSize",
-                "chunking")
+                "sumStat","interpolation","binType","forceHeatmapBinning",
+                "forcedBinSize","chunking")#,"seed")
             not.valid.1 <- which(!valid.1)
             if (length(not.valid.1)>0) {
                 warning("The following ",what," argument names are invalid ",
@@ -212,6 +212,14 @@ validateListArgs <- function(what,arg.list) {
                                 c("auto","spline","linear","neighborhood")
                             )
                         },
+                        binType = {
+                            arg.list$binType <- 
+                                tolower(arg.list$binType[1])
+                            checkTextArgs(
+                                "The binType option of binParams",
+                                arg.list$binType,c("variable","fixed")
+                            )
+                        },
                         forceHeatmapBinning = {
                             if (!is.logical(arg.list$forceHeatmapBinning))
                                 stop("The forceHeatmapBinning option of ",
@@ -232,7 +240,13 @@ validateListArgs <- function(what,arg.list) {
                             if (!is.logical(arg.list$chunking))
                                 stop("The chunking option of binParams ",
                                     "parameter must be TRUE or FALSE!")
-                        },
+                        }#,
+                        #seed = {
+                        #    checkNumArgs(
+                        #        "The seed option of binParams",arg.list$seed,
+                        #        "numeric"
+                        #    )
+                        #}
                     )
                 }
             }
@@ -254,7 +268,7 @@ validateListArgs <- function(what,arg.list) {
         preprocessParams = {
             valid.1 <- names(arg.list) %in% c("fragLen","cleanLevel",
                 "normalize","sampleTo","spliceAction","spliceRemoveQ",
-                "bedGenome","seed")
+                "bedGenome")#,"seed")
             not.valid.1 <- which(!valid.1)
             if (length(not.valid.1)>0) {
                 warning("The following ",what," argument names are invalid ",
@@ -317,12 +331,12 @@ validateListArgs <- function(what,arg.list) {
                                         "mm9","mm10","rn5","dm3","danrer7",
                                         "pantro4","susscr3")
                                 )
-                        },
-                        seed = {
-                            if (!is.numeric(arg.list$seed))
-                                stop("The seed option of preprocessParams ",
-                                    "parameter must be numeric!")
-                        }
+                        }#,
+                        #seed = {
+                        #    if (!is.numeric(arg.list$seed))
+                        #        stop("The seed option of preprocessParams ",
+                        #            "parameter must be numeric!")
+                        #}
                     )
                 }
             }
@@ -509,7 +523,7 @@ validateListArgs <- function(what,arg.list) {
         },
         kmParams = {
             valid.1 <- names(arg.list) %in% c("k","nstart","algorithm",
-                "reference","iterMax","seed")
+                "reference","iterMax")#,"seed")
             not.valid.1 <- which(!valid.1)
             if (length(not.valid.1)>0) {
                 warning("The following ",what," argument names are invalid ",
@@ -545,12 +559,12 @@ validateListArgs <- function(what,arg.list) {
                         iterMax = {
                             checkNumArgs("The iterMax option of kmParams",
                                 arg.list$iterMax,"numeric",0,"gt")
-                        },
-                        seed = {
-                            if (!is.numeric(arg.list$seed))
-                                stop("The seed option of kmParams parameter ",
-                                    "must be numeric!")
-                        }
+                        }#,
+                        #seed = {
+                        #    if (!is.numeric(arg.list$seed))
+                        #        stop("The seed option of kmParams parameter ",
+                        #            "must be numeric!")
+                        #}
                     )
                 }
             }

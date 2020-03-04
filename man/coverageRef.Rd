@@ -3,12 +3,9 @@
 \title{Calculate coverage in a set of reference genomic 
     regions (ChIP-Seq or unspliced mode)}
 \usage{
-    coverageRef(
-        input, 
-        mainRanges,
+    coverageRef(input, mainRanges,
         strandedParams = list(strand=NULL, ignoreStrand=TRUE),
-        rc = NULL
-    )
+        rc = NULL)
 }
 \arguments{
     \item{input}{an input list as in \code{\link{recoup}} but

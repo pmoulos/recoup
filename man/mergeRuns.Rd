@@ -3,17 +3,17 @@
 \title{Merge recoup outputs of same type}
 \usage{
     mergeRuns(..., withDesign = c("auto", "drop"),
-		dropPlots = TRUE)
+        dropPlots = TRUE)
 }
 \arguments{
     \item{...}{one or more \code{\link{recoup}} output 
     objects.}
 
     \item{withDesign}{one of \code{"auto"} (default) or 
-	\code{"drop"}. Determines how to merge designs. See
-	details for further information.}
-	
-	\item{dropPlots}{if profile and/or heatmap plots are
+    \code{"drop"}. Determines how to merge designs. See
+    details for further information.}
+    
+    \item{dropPlots}{if profile and/or heatmap plots are
     attached to the input object(s), they will be 
     recalculated if \code{dropPlots=="TRUE"} (default) or 
     dropped otherwise}.
@@ -52,10 +52,10 @@ test.input.shift <- test.input
 names(test.input.shift) <- paste(names(test.input.shift),"_1",sep="")
 test.input.shift[[1]]$id <- paste0(test.input.shift[[1]]$id,"_1")
 test.input.shift[[1]]$ranges <- 
-	shift(test.input.shift[[1]]$ranges,100)
+    shift(test.input.shift[[1]]$ranges,100)
 test.input.shift[[2]]$id <- paste0(test.input.shift[[2]]$id,"_1")
 test.input.shift[[2]]$ranges <- 
-	shift(test.input.shift[[2]]$ranges,100)
+    shift(test.input.shift[[2]]$ranges,100)
 
 test.tss.1 <- recoup(
     test.input,
