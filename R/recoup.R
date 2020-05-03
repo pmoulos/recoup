@@ -1,7 +1,7 @@
 recoup <- function(
     input,
     design=NULL,
-    region=c("genebody","tss","tes","custom"),
+    region=c("genebody","tss","tes","utr3","custom"),
     type=c("chipseq","rnaseq"),
     signal=c("coverage","rpm"),
     genome=c("hg18","hg19","hg38","mm9","mm10","rn5","rn6","dm3","dm6",
@@ -126,9 +126,16 @@ recoup <- function(
     #complexHeatmapParams=getDefaultListArgs("complexHeatmapParams"),
     bamParams=NULL,
     onTheFly=FALSE, # Directly from BAM w/o Ranges storing, also N/A with BED,
-    localDbHome=file.path(path.expand("~"),".recoup"),
+    #localDb=file.path(path.expand("~"),".recoup"),
+    localDb=file.path(system.file(package="recoup"),"annotation.sqlite"),
     rc=NULL
 ) {
+    # Simple check to throw error if user us using the old databasing system
+    if (any(dir.exists(file.path(dirname(localDb),refdb))))
+        stop("Possible old recoup database system detected. Please rebuild ",
+            "using the new system or download a pre-built database. See also ",
+            "the vignettes.")
+    
     ############################################################################
     # Begin of simple parameter checking for a new or a restored object
     if (is.list(input) && !is.null(input$data)) { # Refeeding recoup object
@@ -147,7 +154,7 @@ recoup <- function(
         input <- readConfig(input)
     checkInput(input)
     if (is.null(names(input)))
-        names(input) <- sapply(input,function(x) return(x$id))
+        names(input) <- vapply(input,function(x) return(x$id),character(1))
     
     # Check if there are any mispelled or invalid parameters and throw a warning
     checkMainArgs(as.list(match.call()))
@@ -159,7 +166,7 @@ recoup <- function(
     signal <- tolower(signal[1])
     if (!is.null(design) && !is.data.frame(design))
         checkFileArgs("design",design)
-    if (!is.data.frame(genome) && file.exists(genome))
+    if (!is.data.frame(genome) && !is.list(genome) && file.exists(genome))
         checkFileArgs("genome",genome)
     else if (is.character(genome))
         checkTextArgs("genome",genome,getSupportedOrganisms(),multiarg=FALSE)
@@ -200,6 +207,33 @@ recoup <- function(
     if (type=="rnaseq" && !(genome %in% getSupportedOrganisms()))
         stop("When type is \"rnaseq\", only the supported genomes are allowed!")
     
+    # annotation must be a list to be fed to buildCustomAnnotation
+    if (is.list(genome) && !is.data.frame(genome)) {
+        # members are checked by buildCustomAnnotation if required
+        # We only need to check that the gtfFile exists here
+        if (!("gtf" %in% names(genome)))
+            stopp("A gtf field must be provided with an existing GTF file ",
+                "when providing a list with custom annotation elements!")
+        if ("gtf" %in% names(genome) && is.character(genome$gtf)
+            && !file.exists(genome$gtf))
+            stop("An existing GTF file must be provided when providing a ",
+                "list with custom annotation elements!")
+    }
+        
+    # Check what is going on with genome, first check if file, then localDb
+    if (!is.data.frame(genome) && !is.list(genome) && is.character(genome)
+        && !file.exists(genome) && is.character(localDb) 
+        && file.exists(localDb)) {
+        if (!.userOrg(genome,localDb))
+            checkTextArgs("genome",genome,c("hg18","hg19","hg38","mm9","mm10",
+                "rn5","rn6","dm3","dm6","danrer7","danrer10","pantro4",
+                "pantro5","susscr3","susscr11","ecucab2","tair10"),
+                multiarg=FALSE)
+        if (!.userRefdb(refdb,localDb))
+            checkTextArgs("refdb",refdb,c("ensembl","ucsc","refseq"),
+                multiarg=FALSE)
+    }
+    
     # and list arguments
     orderByDefault <- getDefaultListArgs("orderBy")
     binParamsDefault <- getDefaultListArgs("binParams")
@@ -232,12 +266,12 @@ recoup <- function(
     strandedParams <- validateListArgs("strandedParams",strandedParams)
     
     if (is.null(plotParams$outputBase))
-        plotParams$outputBase <- paste(sapply(input,function(x) return(x$id)),
-            collapse="-")
+        plotParams$outputBase <- paste(vapply(input,function(x) return(x$id),
+            character(1)),collapse="-")
     
-    if (any(sapply(input,function(x) return(tolower(x$format)=="bed")))
-        && !(preprocessParams$bedGenome %in% c("hg18","hg19","hg38","mm9",
-            "mm10","rn5","dm3","danrer7","pantro4","susscr3")))
+    bbb <- vapply(input,function(x) return(tolower(x$format)=="bed"),logical(1))
+    if (any(bbb) && !(preprocessParams$bedGenome %in% c("hg18","hg19","hg38",
+            "mm9","mm10","rn5","dm3","danrer7","pantro4","susscr3")))
         stop("When short read files are in BED format, either the genome ",
             "parameter should be one\nof the supported organisms, or ",
             "preprocessParams$bedGenome must be specified as one of them.")
@@ -291,8 +325,8 @@ recoup <- function(
             #    prevCallParams$bamParams,bamParams), ## Unused
             onTheFly=if (is.null(thisCall$onTheFly)) prevCallParams$onTheFly 
                 else onTheFly,
-            localDbHome=if (is.null(thisCall$localDbHome)) 
-                prevCallParams$localDbHome else localDbHome,
+            localDb=if (is.null(thisCall$localDb)) 
+                prevCallParams$localDb else localDb,
             rc=if (is.null(thisCall$rc)) prevCallParams$rc else rc,
             customIsBase=NULL # Additional placeholder
         )
@@ -319,7 +353,7 @@ recoup <- function(
             complexHeatmapParams=complexHeatmapParams,
             bamParams=bamParams,
             onTheFly=onTheFly,
-            localDbHome=localDbHome,
+            localDb=localDb,
             rc=rc,
             customIsBase=NULL # Additional placeholder
         )
@@ -350,152 +384,127 @@ recoup <- function(
     complexHeatmapParams <- callParams$complexHeatmapParams
     bamParams <- callParams$bamParams
     onTheFly <- callParams$onTheFly
-    localDbHome <- callParams$localDbHome
+    localDb <- callParams$localDb
     rc <- callParams$rc
     # End of complex parameter storage procedure and parameter recall from a
     # previous call
     ############################################################################
     
     # Continue with actual work
-    if (!is.data.frame(genome)) {
-        if (file.exists(genome)) {
-            genome <- read.delim(genome) # Must be bed like
-            rownames(genome) <- as.character(genome[,4])
-            genomeRanges <- makeGRangesFromDataFrame(
-                df=genome,
-                keep.extra.columns=TRUE
-            )
-        }
-        else {
-            # Check if local storage has been set
-            storageHome <- file.path(localDbHome,refdb,genome)
-            if (dir.exists(storageHome)) {
-                # Some compatibility with previous annoation stores
-                if ("gene.rda" %in% dir(storageHome)) { # Older version
-                    warning("Older annotation storage detected! Please ",
-                        "rebuild your annotation storage\nusing the ",
-                        "buildAnnotationStore function so as to have the\n",
-                        "ability of versioning genomic coordinate annotations.",
-                        "\nIn the future, older versions may become unusable.",
-                        "\n",immediate.=TRUE)
-                    storageHomeVersion <- storageHome
-                }
-                else { # Newer version
-                    # Decide on version
-                    if (version != "auto") {
-                        storageHomeVersion <- file.path(storageHome,version)
-                        if (!dir.exists(storageHomeVersion)) {
-                            warning("The annotation directory ",
-                                storageHomeVersion,
-                                " does not seem to exist! Have you run ",
-                                "buildAnnotationStorage? Will use newest ",
-                                "existing version.",immediate.=TRUE)
-                            version <- "auto"
-                        }
-                    }
-                    if (version == "auto") {
-                        vers <- suppressWarnings(as.numeric(dir(storageHome)))
-                        if (any(is.na(vers))) {
-                            of <- vers[which(is.na(vers))]
-                            stop("Corrupted annotation storage directory ",
-                                "contents! ->",of,"<- Either remove offending ",
-                                "files/directories or rebuild.")
-                        }
-                        vers <- sort(vers,decreasing=TRUE)
-                        version <- vers[1]
-                        storageHomeVersion <- file.path(storageHome,version)
-                    }
-                }
-                
-                if (type=="chipseq") {
-                    g <- load(file.path(storageHomeVersion,"gene.rda"))
-                    genomeRanges <- gene
-                    helperRanges <- NULL
-                }
-                else if (type=="rnaseq") {
-                    # Load the helper ranges anyway
-                    g <- load(file.path(storageHomeVersion,"gene.rda"))
-                    helperRanges <- gene
-                    if (all(flank==0)) {
-                        g <- load(file.path(storageHomeVersion,
-                            "summarized_exon.rda"))
-                        genomeRanges <- sexon
-                    }
-                    else if (all(flank==500)) {
-                        g <- load(file.path(storageHomeVersion,
-                            "summarized_exon_F500.rda"))
-                        genomeRanges <- flankedSexon
-                    }
-                    else if (all(flank==1000)) {
-                        g <- load(file.path(storageHomeVersion,
-                            "summarized_exon_F1000.rda"))
-                        genomeRanges <- flankedSexon
-                    }
-                    else if (all(flank==2000)) {
-                        g <- load(file.path(storageHomeVersion,
-                            "summarized_exon_F2000.rda"))
-                        genomeRanges <- flankedSexon
-                    }
-                    else if (all(flank==5000)) {
-                        g <- load(file.path(storageHomeVersion,
-                            "summarized_exon_F5000.rda"))
-                        genomeRanges <- flankedSexon
-                    }
-                    else {
-                        warning("When using recoup in RNA-Seq mode, it is ",
-                            "much faster to use a precalculated set of ",
-                            "regions and their flanks (0, 500, 1000, 2000 and ",
-                            "5000 bps supported) and subset this one for a ",
-                            "custom set of genes. Otherwise calculations may ",
-                            "take too long to complete.",immediate.=TRUE)
-                        genomeRanges <- 
-                            getMainRnaRangesOnTheFly(helperRanges,flank,rc=rc)
-                    }
-                }
-            }
-            else { # On the fly
-                message("Getting annotation on the fly for ",genome," from ",
-                    refdb)
-                if (type=="chipseq") {
-                    genome <- getAnnotation(genome,"gene",refdb=refdb,rc=rc)
-                    helperRanges <- NULL
-                }
-                else if (type=="rnaseq") {
-                    helper <- getAnnotation(genome,"gene",refdb=refdb,rc=rc)
-                    helperRanges <- makeGRangesFromDataFrame(
-                        df=helper,
-                        keep.extra.columns=TRUE,
-                        seqnames.field="chromosome"
-                    )
-                    names(helperRanges) <- as.character(helperRanges$gene_id)
-                    genome <- getAnnotation(genome,"exon",refdb=refdb,rc=rc)
-                    annGr <- makeGRangesFromDataFrame(
-                        df=genome,
-                        keep.extra.columns=TRUE,
-                        seqnames.field="chromosome"
-                    )
-                    message("Merging exons")
-                    annGr <- reduceExons(annGr,rc=rc)
-                    names(annGr) <- as.character(annGr$exon_id)
-                    genomeRanges <- split(annGr,annGr$gene_id)
-                }
-            }
-        }
-    }
-    else {
+    # Annotation case #1: provided strictly as a BED-like data frame with loci
+    if (is.data.frame(genome)) {
+        if (type=="rnaseq")
+            stop("When type=\"rnaseq\", only the usage of a supported or user-",
+                "imported organism from GTF file is allowed!")
         rownames(genome) <- as.character(genome[,4])
         genomeRanges <- makeGRangesFromDataFrame(
             df=genome,
             keep.extra.columns=TRUE
         )
     }
+    # Annotation case #2: provided strictly as a BED-like file with loci
+    else if (!is.list(genome) && !is.data.frame(genome) 
+        && is.character(genome)) {
+        if (file.exists(genome)) {
+            if (type=="rnaseq")
+                stop("When type=\"rnaseq\", only the usage of a supported or ",
+                    "user-imported organism from GTF file is allowed!")
+            genome <- read.delim(genome)
+            rownames(genome) <- as.character(genome[,4])
+            genomeRanges <- makeGRangesFromDataFrame(
+                df=genome,
+                keep.extra.columns=TRUE
+            )
+        }
+        # Annotation case #3: use local database or automatically on-the-fly
+        else {
+            if (type=="chipseq") {
+                if (region == "utr3")
+                    genomeRanges <- tryCatch(loadAnnotation(genome,refdb,
+                        type="utr",version=version,summarized=TRUE,db=localDb,
+                        rc=rc),
+                        error=function(e) {
+                            tryCatch({
+                                gtfFile <- genome$gtf
+                                metadata <- genome
+                                metadata$gtf <- NULL
+                                genomeRanges <- importCustomAnnotation(gtfFile,
+                                    metadata,"utr")
+                            },error=function(e) {
+                                message("Error ",e)
+                                stop("Please provide an existing organism or ",
+                                    "a list with annotation metadata and GTF ",
+                                    "file!")
+                            },finally="")
+                        },finally="")
+                else
+                    genomeRanges <- tryCatch(loadAnnotation(genome,refdb,
+                        type="gene",version=version,db=localDb,rc=rc),
+                        error=function(e) {
+                            tryCatch({
+                                gtfFile <- genome$gtf
+                                metadata <- genome
+                                metadata$gtf <- NULL
+                                geneData <- importCustomAnnotation(gtfFile,
+                                    metadata,"gene")
+                            },error=function(e) {
+                                message("Error ",e)
+                                stop("Please provide an existing organism or ",
+                                    "a list with annotation metadata and GTF ",
+                                    "file!")
+                            },finally="")
+                        },finally="")
+            
+                helperRanges <- NULL
+            }
+            else if (type=="rnaseq") {
+                genomeRanges <- tryCatch(loadAnnotation(genome,refdb,
+                    type="exon",version=version,summarized=TRUE,db=localDb,
+                    rc=rc),
+                    error=function(e) {
+                        tryCatch({
+                            gtfFile <- genome$gtf
+                            metadata <- genome
+                            metadata$gtf <- NULL
+                            genomeRanges <- importCustomAnnotation(gtfFile,
+                                metadata,"exon")
+                        },error=function(e) {
+                            message("Error ",e)
+                            stop("Please provide an existing organism or ",
+                                    "a list with annotation metadata and GTF ",
+                                    "file!")
+                        },finally="")
+                    },finally="")
+                helperRanges <- tryCatch(loadAnnotation(genome,refdb,
+                    type="gene",version=version,db=localDb,rc=rc),
+                    error=function(e) {
+                        tryCatch({
+                            gtfFile <- annotation$gtf
+                            metadata <- annotation
+                            metadata$gtf <- NULL
+                            geneData <- importCustomAnnotation(gtfFile,
+                                metadata,"gene")
+                        },error=function(e) {
+                            message("Error ",e)
+                            stop("Please provide an existing organism or ",
+                                "a list with annotation metadata and GTF ",
+                                "file!")
+                        },finally="")
+                    },finally="")
+                if (!is(genomeRanges,"GRangesList"))
+                    genomeRanges <- split(genomeRanges,genomeRanges$gene_id)
+                helperRanges <- helperRanges[names(genomeRanges)]
+            }
+        }
+    }
     
     # After genome read, check if we have a valid custom orderer
     if (!is.null(orderBy$custom)) {
-        if (length(orderBy$custom) != nrow(genome)) {
+        if (length(orderBy$custom) != length(genomeRanges)) {
             warning("The custom orderer provide with orderBy parameter does ",
-                "not have length equal to the number of elements in genome ",
-                "argument and will be ignored!",immediate.=TRUE)
+                "not have length equal to the number\nof elements in the ",
+                "interrogated genomic regions and will be ignored!",
+                immediate.=TRUE)
             orderBy$custom <- NULL
         }
     }
@@ -550,8 +559,8 @@ recoup <- function(
                     helperRanges[rownames(design)]
                 },error=function(e) {
                     stop("Unexpected error occured! Are you sure that element ",
-                        "(row) names in the design file are of the same type as ",
-                        "the genome file?")
+                        "(row) names in the design file are of the same type ",
+                        "as the genome file?")
                 },finally={})
         }
         # ...but maybe the names are incompatible
@@ -577,7 +586,8 @@ recoup <- function(
     }
     
     # Now we must follow two paths according to region type, genebody and custom
-    # areas with equal/unequal widths, or tss, tes and 1-width custom areas.
+    # areas with equal/unequal widths and utr3 or tss, tes and 1-width custom 
+    # areas.
     callParams$customIsBase <- FALSE
     if (region=="custom" && all(width(genomeRanges)==1)) {
         if (all(flank==0)) {
@@ -612,20 +622,23 @@ recoup <- function(
     # TODO: When input ranges are custom, genome should be given to make Seqinfo
     if (type == "chipseq") # Otherwise, throw error with GRangesList
         mainRanges <- trim(intermRanges$mainRanges)
+    else if (type == "rnaseq")
+        mainRanges <- intermRanges$mainRanges
     bamRanges <- trim(intermRanges$bamRanges)
 
     # Here we must write code for the reading and normalization of bam files
     # The preprocessRanges function looks if there is a valid (not null) ranges
     # field in input
-    #if (!onTheFly)
-    #input <- preprocessRanges(input,preprocessParams,bamParams=bamParams,rc=rc)
-    input <- preprocessRanges(input,preprocessParams,genome,bamRanges,
-        bamParams=bamParams,rc=rc)
+    if (!onTheFly)
+        input <- preprocessRanges(input,preprocessParams,genome,bamRanges,
+            bamParams=bamParams,rc=rc)
     
     # At this point we must apply the fraction parameter if <1. We choose this
     # point in order not to restrict later usage of the read ranges and since it
-    # does not take much time to load into memory.
-    if (fraction<1) {
+    # does not take much time to load into memory. In addition, this operation
+    # cannot be applied when streaming BAMs. In that case, user must subsample
+    # outside recoup.
+    if (!onTheFly && fraction<1) {
         newSize <- round(fraction*length(mainRanges))
         #set.seed(preprocessParams$seed)
         refIndex <- sort(sample(length(mainRanges),newSize))
@@ -644,70 +657,51 @@ recoup <- function(
         }
     }
 
-    # Remove unwanted seqnames from reference ranges
-    chrs <- unique(unlist(lapply(input,function(x) {
-        if (x$format %in% c("bam","bed"))
-            return(as.character(runValue(seqnames(x$ranges))))
-        else if (x$format=="bigwig") {
-            if (!requireNamespace("rtracklayer"))
-                stop("R package rtracklayer is required to read and import ",
-                    "BigWig files!")
-            return(as.character(seqnames(seqinfo(BigWigFile(x$file)))))
+    # Remove unwanted seqnames from reference ranges (if not on the fly) and
+    # properly subset ranges if not all chromosomes are provided with BAM
+    if (!onTheFly) {
+        chrs <- unique(unlist(lapply(input,function(x) {
+            if (x$format %in% c("bam","bed"))
+                return(as.character(runValue(seqnames(x$ranges))))
+            else if (x$format=="bigwig") {
+                if (!requireNamespace("rtracklayer"))
+                    stop("R package rtracklayer is required to read and ",
+                        "import BigWig files!")
+                return(as.character(seqnames(seqinfo(BigWigFile(x$file)))))
+            }
+        })))
+        if (type=="chipseq") {
+            #keep <- which(as.character(seqnames(mainRanges)) %in% chrs)
+            #mainRanges <- mainRanges[keep]
+            mainRanges <- .subsetGRangesByChrs(mainRanges,chrs)
         }
-    })))
-    if (type=="chipseq") {
-        keep <- which(as.character(seqnames(mainRanges)) %in% chrs)
-        mainRanges <- mainRanges[keep]
-    }
-    else if (type=="rnaseq") {
-        keeph <- which(as.character(seqnames(helperRanges)) %in% chrs)
-        helperRanges <- helperRanges[keeph]
-        mainRanges <- mainRanges[names(helperRanges)]
-        ########################################################################
-        ## There must be an R bug with `lengths` here as although it runs in 
-        ## Rcmd, it does not pass package building or vignette kniting... But 
-        ## for the time being it seems that it is not needed as the name 
-        ## filtering works
-        #lens <- which(lengths(genomeRanges)==0)
-        #if (length(lens)>0)
-        #    genomeRanges[lens] <- NULL
-        ########################################################################
+        else if (type=="rnaseq") {
+            #keeph <- which(as.character(seqnames(helperRanges)) %in% chrs)
+            #helperRanges <- helperRanges[keeph]
+            #mainRanges <- mainRanges[names(helperRanges)]
+            helperRanges <- .subsetGRangesByChrs(helperRanges,chrs)
+            mainRanges <- .subsetGRangesByChrs(mainRanges,chrs)
+            
+            ####################################################################
+            ## There must be an R bug with `lengths` here as although it runs in
+            ## Rcmd, it does not pass package building or vignette kniting...  
+            ## But for the time being it seems that it is not needed as the name
+            ## filtering works
+            #lens <- which(lengths(genomeRanges)==0)
+            #if (length(lens)>0)
+            #    genomeRanges[lens] <- NULL
+            ####################################################################
+        }
     }
     
-    #if (type=="chipseq")
-    #    input <- coverageRef(input,genomeRanges,region,flank,strandedParams,
-    #        rc=rc)#,bamParams)
-    #else if (type=="rnaseq")
-    #    input <- coverageRnaRef(input,genomeRanges,helperRanges,flank,
-    #        strandedParams,rc=rc)#,bamParams)
-    #if (type=="chipseq")
-    #    input <- coverageRef(input,mainRanges,strandedParams,rc=rc)
-    #else if (type=="rnaseq") #{
-        #if (flank[1]==0 && flank[2]==0)
-        #    mainRnaRanges <- genomeRanges
-        #else {
-        #    mainRnaRanges <- tryCatch(
-        #        loadMainRnaRanges(genome,refdb,flank),
-        #        error=function(e) { # Insanely slow fallback switch
-        #            warning("The requested flanking regions are not ",
-        #                "compatible with any of the precalculated ones. They ",
-        #                "will be calculated on the fly which is a lenghty ",
-        #                "process. If you wish to use precalculated flanking ",
-        #                "regions, stop the execution and adjust the flanking ",
-        #                "parameter.",immediate.=TRUE)
-        #            getMainRnaRangesOnTheFly(helperRanges,flank,rc=rc)
-        #        },finally=""
-        #    )
-        #}
-        #input <- coverageRnaRef(input,mainRanges,strandedParams,rc=rc)
-    #}
     if(signal == "coverage")
         input <- coverageRef(input,mainRanges,strandedParams,rc=rc)
     else if (signal == "rpm")
         input <- rpMatrix(input,mainRanges,flank,binParams,strandedParams,rc=rc)
     
     # If normalization method is linear, we must adjust the coverages
-    if (preprocessParams$normalize == "linear") {
+    # TODO: Check for onTheFly in the beginning
+    if (preprocessParams$normalize == "linear" && !onTheFly) {
         linFac <- calcLinearFactors(input,preprocessParams)
         for (n in names(input)) {
             if (linFac[n]==1)
@@ -724,13 +718,12 @@ recoup <- function(
         }
     }
     
-    # Now we must summarize and create the matrices. If genebody or unequal 
-    # custom lengths, bin is a must, else we leave to user
+    # Now we must summarize and create the matrices. If genebody, utr3 or 
+    # unequal custom lengths, bin is a must, else we leave to user
     mustBin <- FALSE
-    if (region=="genebody")
+    if (region=="genebody" || region=="utr3")
         mustBin <- TRUE
     if (region=="custom") {
-        #w <- width(genomeRanges)
         w <- width(mainRanges)
         if (any(w!=w[1]))
             mustBin <- TRUE
@@ -738,8 +731,8 @@ recoup <- function(
     if (mustBin) {
         if (binParams$regionBinSize==0) {
             warning("Central region bin size not set for a region that must ",
-                "be binned! Setting to 1000...",immediate.=TRUE)
-            binParams$regionBinSize <- 1000
+                "be binned! Setting to 200...",immediate.=TRUE)
+            binParams$regionBinSize <- 200
         }
     }
     
@@ -763,7 +756,7 @@ recoup <- function(
     
     # Coverages and profiles calculated... Now depending on plot option, we go 
     # further or return the enriched input object for saving
-    if (!plotParams$profile && !plotParams$heatmap) {
+    if (!plotParams$profile && !plotParams$heatmap && !plotParams$correlation) {
         recoupObj <- toOutput(input,design,saveParams,callParams=callParams)
         return(recoupObj)
     }

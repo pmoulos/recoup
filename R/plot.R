@@ -483,7 +483,7 @@ recoupHeatmap <- function(recoupObj,samples=NULL,rc=NULL) {
         }
     }
     
-    haCol <- HeatmapAnnotation(cn=function(index) {
+    haCol <- HeatmapAnnotation(locus=function(index) {
         width <- ncol(input[[1]]$profile)
         labCol <- rep("",width)
         lb <- makeHorizontalAnnotation(width,opts,"heatmap")

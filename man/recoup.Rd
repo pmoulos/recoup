@@ -527,9 +527,9 @@
     \item{onTheFly}{Read short reads directly from BAM files
     when input contains paths to BAM files. In this case the
     storage of short reads in the output list object as a 
-    GRanges object is not possible. This argument is not
-    used in this release and is a placeholder for the next
-    release.}
+    GRanges object is not possible and the final object 
+    becomes less reusable but the memory footprint is 
+    lower. Defaults to \code{FALSE}.}
     
     \item{localDbHome}{local path to retrieve annotation 
     from when \code{genome} is one of the supported 

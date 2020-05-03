@@ -17,6 +17,7 @@ Imports:
     graphics,
     grDevices,
     methods,
+    RSQLite,
     rtracklayer,
     S4Vectors,
     stats,
@@ -32,7 +33,6 @@ Suggests:
     RUnit,
     BiocManager,
     BSgenome,
-    RSQLite,
     RMySQL
 Enhances: parallel
 Description: recoup calculates and plots signal profiles
@@ -54,8 +54,8 @@ biocViews: ImmunoOncology, Software, GeneExpression, Preprocessing, QualityContr
 VignetteBuilder: knitr
 Authors@R: c(person(given="Panagiotis", family="Moulos",
     email="moulos@fleming.gr", role=c("aut", "cre")))
-Version: 1.15.1
-Date: 2020-03-04
+Version: 1.15.2
+Date: 2020-04-15
 Collate:
     'annotation.R'
     'argcheck.R'
@@ -65,4 +65,5 @@ Collate:
     'recoup.R'
     'plot.R'
     'profile.R'
+    'query.R'
     'util.R'

@@ -33,7 +33,7 @@ rpMatrix <- function(input,mainRanges,flank,binParams,
         message(" center")
         if (is(mainRanges,"GRanges"))
             areasCenter <- splitRanges(mainRanges,binParams$regionBinSize,
-                binParams$binType,flank,where="center")
+                binParams$binType,flank,where="center",rc=rc)
         else if (is(mainRanges,"GRangesList"))
             areasCenter <- splitRangesList(mainRanges,binParams$regionBinSize,
                 binParams$binType,flank,where="center",#seed=binParams$seed,
@@ -45,7 +45,7 @@ rpMatrix <- function(input,mainRanges,flank,binParams,
             message(" upstream")
             if (is(mainRanges,"GRanges"))
                 areasUpstream <- splitRanges(mainRanges,binParams$flankBinSize,
-                    binParams$binType,flank,where="upstream")
+                    binParams$binType,flank,where="upstream",rc=rc)
             else if (is(mainRanges,"GRangesList"))
                 areasUpstream <- splitRangesList(mainRanges,
                     binParams$flankBinSize,binParams$binType,flank,
@@ -59,7 +59,7 @@ rpMatrix <- function(input,mainRanges,flank,binParams,
             if (is(mainRanges,"GRanges"))
                 areasDownstream <- splitRanges(mainRanges,
                     binParams$flankBinSize,binParams$binType,flank,
-                    where="downstream")
+                    where="downstream",rc=rc)
             else if (is(mainRanges,"GRangesList"))
                 areasDownstream <- splitRangesList(mainRanges,
                     binParams$flankBinSize,binParams$binType,flank,
@@ -113,7 +113,7 @@ rpMatrix <- function(input,mainRanges,flank,binParams,
     }
     else {
         if (is(mainRanges,"GRanges"))
-            areas <- splitRanges(mainRanges,binParams$regionBinSize)
+            areas <- splitRanges(mainRanges,binParams$regionBinSize,rc=rc)
         else if (is(mainRanges,"GRangesList"))
             areas <- splitRangesList(mainRanges,binParams$regionBinSize,
                 binParams$binType,flank,

@@ -39,6 +39,8 @@
     directory and contents are created.
 }
 \description{
+    *This function is defunct! Please use
+    \code{\link{buildAnnotationDatabase}}.*
     This function creates a local annotation database to be
     used with recoup so as to avoid long time on the fly 
     annotation downloads and formatting.

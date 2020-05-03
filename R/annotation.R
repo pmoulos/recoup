@@ -1,6 +1,6 @@
-buildAnnotationStore <- function(organisms,sources,
-    home=file.path(path.expand("~"),".recoup"),forceDownload=TRUE,rc=NULL) {
-
+buildAnnotationDatabase <- function(organisms,sources,
+    db=file.path(system.file(package="recoup"),"annotation.sqlite"),
+    forceDownload=TRUE,rc=NULL) {
     if (missing(organisms))
         organisms <- getSupportedOrganisms()
     if (missing(sources))
@@ -29,29 +29,27 @@ buildAnnotationStore <- function(organisms,sources,
         stop("R package GenomeInfoDb is required to construct annotation ",
             "stores!")
     
+    # Check database path
+    if (!dir.exists(dirname(db)))
+        dir.create(dirname(db),recursive=TRUE,mode="0755")
+    
+    # Initialize or open the annotation SQLite datatabase
+    message("Opening recoup SQLite database ",db)
+    con <- initDatabase(db)
+    
     for (s in sources) {
         for (o in organisms) {
-            # Retrieving genome info
+            # Retrieving genome info. We will be inserting the seqinfo to the
+            # sqlite multiple times for the sake of simplicity regarding later
+            # deletion by foreign key cascade.
             message("Retrieving genome information for ",o," from ",s)
-            sf <- tryCatch(GenomeInfoDb::fetchExtendedChromInfoFromUCSC(
-                getUcscOrganism(o)),error=function(e) {
-                    message("GenomeInfoDb::fetchExtendedChromInfoFromUCSC ",
-                        "failed with the following error: ")
-                    message(e)
-                    message("")
-                    message("Trying a direct download...")
-                    getChromInfo(getUcscOrganism(o))
-                },finally="")
-            rownames(sf) <- as.character(sf[,1])
-            sf <- sf[getValidChrs(o),]
-            sf <- Seqinfo(seqnames=sf[,1],seqlengths=sf[,2],
-                isCircular=sf[,3],genome=getUcscOrganism(o))
+            sf <- getSeqInfo(o)
             
-            # Now, we must build the directory structure. For Ensembl it's
-            # obvious as it has official versions. For UCSC we need to keep a
-            # date track. Then inside recoup, if date not provided, it will
-            # automatically detect the latest one (as in Ensembl with versions,
-            # if not provided).
+            # Now, we must derive versioning. For Ensembl it's obvious as it has
+            # official versions. For UCSC we need to keep a date track. Then 
+            # inside metaseqR, if date not provided, it will automatically
+            # detect the latest one (as in Ensembl with versions, if not
+            # provided).
             if (s == "ensembl") {
                 if (orgIsList)
                     vs <- orgList[[o]]
@@ -62,155 +60,740 @@ buildAnnotationStore <- function(organisms,sources,
             }
             else if (s %in% getSupportedUcscDbs())
                 vs <- format(Sys.Date(),"%Y%m%d")
-            
-            # Retrieve gene annotations
+                        
             for (v in vs) {
-                storePath <- file.path(home,s,o,v)
-                if (!dir.exists(storePath))
-                    dir.create(storePath,recursive=TRUE,mode="0755")
-                if (file.exists(file.path(storePath,"gene.rda")) 
-                    && !forceDownload)
+                # Retrieve gene annotations
+                if (.annotationExists(con,o,s,v,"gene") && !forceDownload)
                     message("Gene annotation for ",o," from ",s," version ",v,
-                        " has already been created and will be skipped. If ",
+                        " has already been created and will be skipped.\nIf ",
                         "you wish to recreate it choose forceDownload = TRUE.")
                 else {
                     message("Retrieving gene annotation for ",o," from ",s,
                         " version ",v)
                     ann <- getAnnotation(o,"gene",refdb=s,ver=v,rc=rc)
-                    gene <- makeGRangesFromDataFrame(
-                        df=ann,
-                        seqinfo=sf,
-                        keep.extra.columns=TRUE,
-                        seqnames.field="chromosome"
-                    )
-                    save(gene,file=file.path(storePath,"gene.rda"),
-                        compress=TRUE)
+                    
+                    # First drop if previously exists
+                    nr <- .dropAnnotation(con,o,s,v,"gene")
+                    # Then insert to the contents table so as to get the content
+                    # id to attach in the annotation table
+                    nr <- .insertContent(con,o,s,v,"gene")
+                    nid <- .annotationExists(con,o,s,v,"gene",out="id")
+                    # If something happens, the whole procedure will break
+                    # anyway
+                    # Add content_id
+                    ann$content_id <- rep(nid,nrow(ann))
+                    sfGene <- sf
+                    sfGene$content_id <- rep(nid,nrow(sfGene))
+                    # Write genes and seqinfo
+                    dbWriteTable(con,"gene",ann,row.names=FALSE,append=TRUE)
+                    dbWriteTable(con,"seqinfo",sfGene,row.names=FALSE,
+                        append=TRUE)
                 }
                 
-                # Retrieve transcript annotations
-                if (file.exists(file.path(storePath,"transcript.rda"))
+                # Retrieve 3' UTR annotations
+                if (.annotationExists(con,o,s,v,"utr") && !forceDownload)
+                    message("3' UTR annotation for ",o," from ",s," version ",
+                        v," has already been created and will be skipped.\nIf ",
+                        "you wish to recreate it choose forceDownload = TRUE.")
+                else {
+                    message("Retrieving 3' UTR annotation for ",o,
+                        " from ",s," version ",v)
+                    ann <- getAnnotation(o,"utr",refdb=s,ver=v,rc=rc)
+                    nr <- .dropAnnotation(con,o,s,v,"utr")
+                    nr <- .insertContent(con,o,s,v,"utr")
+                    nid <- .annotationExists(con,o,s,v,"utr",out="id")
+                    ann$content_id <- rep(nid,nrow(ann))
+                    sfUtr <- sf
+                    sfUtr$content_id <- rep(nid,nrow(sfUtr))
+                    dbWriteTable(con,"utr",ann,row.names=FALSE,
+                        append=TRUE)
+                    dbWriteTable(con,"seqinfo",sfUtr,row.names=FALSE,
+                        append=TRUE)
+                }
+                
+                # Then summarize the 3'utrs per gene and write again with type 
+                # sum_utr
+                if (.annotationExists(con,o,s,v,"summarized_3utr")
                     && !forceDownload)
-                    message("Transcript annotation for ",o," from ",s,
-                        " version ",v," has already been created and will be ",
-                        "skipped. If you wish to recreate it choose ",
+                    message("Summarized 3' UTR annotation for ",o," from ",
+                        s," version ",v," has already been created and will ",
+                        "be skipped.\nIf you wish to recreate it choose ",
                         "forceDownload = TRUE.")
                 else {
-                    message("Retrieving transcript annotation for ",o,
-                        " from ",s," version ",v)
-                    ann <- getAnnotation(o,"transcript",refdb=s,ver=v,rc=rc)
-                    transcript <- makeGRangesFromDataFrame(
-                        df=ann,
-                        seqinfo=sf,
-                        keep.extra.columns=TRUE,
-                        seqnames.field="chromosome"
+                    if (!.annotationExists(con,o,s,v,"utr")) 
+                        stop("3' UTR annotation for ",o," from ",s," version ",
+                            vs," is required in order to build predefined ",
+                            "merged 3' UTR regions for read counting.\nPlease ",
+                            "rerun the buildAnnotationStore function with ",
+                            "appropriate parameters.")
+                    annGr <- .loadPrebuiltAnnotation(con,o,s,v,"utr")
+                    message("Merging gene 3' UTRs for ",o," from ",s,
+                        " version ",v)
+                    #annGr <- reduceTranscripts(annGr)
+                    #ann <- as.data.frame(annGr)
+                    annList <- reduceTranscripts(annGr)
+                    ann <- as.data.frame(annList$model)
+                    ann <- ann[,c(1:3,6,7,5,8,9)]
+                    names(ann)[1] <- "chromosome"
+                    ann$chromosome <- as.character(ann$chromosome)
+                    ann <- ann[order(ann$chromosome,ann$start),]
+                    nr <- .dropAnnotation(con,o,s,v,"summarized_3utr")
+                    nr <- .insertContent(con,o,s,v,"summarized_3utr")
+                    nid <- .annotationExists(con,o,s,v,"summarized_3utr",
+                        out="id")
+                    ann$content_id <- rep(nid,nrow(ann))
+                    sfSumUtr <- sf
+                    sfSumUtr$content_id <- rep(nid,nrow(sfSumUtr))
+                    dbWriteTable(con,"summarized_3utr",ann,row.names=FALSE,
+                        append=TRUE)
+                    dbWriteTable(con,"seqinfo",sfSumUtr,row.names=FALSE,
+                        append=TRUE)
+                    
+                    activeLength <- annList$length
+                    nr <- .dropAnnotation(con,o,s,v,"active_utr_length")
+                    nr <- .insertContent(con,o,s,v,"active_utr_length")
+                    nid <- .annotationExists(con,o,s,v,"active_utr_length",
+                        out="id")
+                    active <- data.frame(
+                        name=names(activeLength),
+                        length=activeLength,
+                        content_id=rep(nid,length(activeLength))
                     )
-                    save(transcript,file=file.path(storePath,"transcript.rda"),
-                        compress=TRUE)
+                    dbWriteTable(con,"active_utr_length",active,row.names=FALSE,
+                        append=TRUE)
                 }
                 
-                # Code to retrieve UTR annotations
-                # Stub
-                
                 # Retrieve exon annotations
-                if (file.exists(file.path(storePath,"exon.rda")) 
-                    && !forceDownload)
+                if (.annotationExists(con,o,s,v,"exon") && !forceDownload)
                     message("Exon annotation for ",o," from ",s," version ",v,
-                        " has already been created and will be skipped. If ",
+                        " has already been created and will be skipped.\nIf ",
                         "you wish to recreate it choose forceDownload = TRUE.")
                 else {
                     message("Retrieving exon annotation for ",o," from ",s,
                         " version ",v)
                     ann <- getAnnotation(o,"exon",refdb=s,ver=v,rc=rc)
-                    annGr <- makeGRangesFromDataFrame(
-                        df=ann,
-                        seqinfo=sf,
-                        keep.extra.columns=TRUE,
-                        seqnames.field="chromosome"
-                    )
-                    exon <- split(annGr,annGr$gene_id)
-                    save(exon,file=file.path(storePath,"exon.rda"),
-                        compress=TRUE)
+                    nr <- .dropAnnotation(con,o,s,v,"exon")
+                    nr <- .insertContent(con,o,s,v,"exon")
+                    nid <- .annotationExists(con,o,s,v,"exon",out="id")
+                    ann$content_id <- rep(nid,nrow(ann))
+                    sfExon <- sf
+                    sfExon$content_id <- rep(nid,nrow(sfExon))
+                    dbWriteTable(con,"exon",ann,row.names=FALSE,
+                        append=TRUE)
+                    dbWriteTable(con,"seqinfo",sfExon,row.names=FALSE,
+                        append=TRUE)
                 }
                 
                 # Then summarize the exons and write again with type sum_exon
-                if (file.exists(file.path(storePath,"summarized_exon.rda")) 
+                if (.annotationExists(con,o,s,v,"summarized_exon")
                     && !forceDownload)
                     message("Summarized exon annotation for ",o," from ",s,
                         " version ",v," has already been created and will be ",
-                        "skipped. If you wish to recreate it choose ",
+                        "skipped.\nIf you wish to recreate it choose ",
                         "forceDownload = TRUE.")
                 else {
-                    if (!file.exists(file.path(storePath,"exon.rda")))
+                    if (!.annotationExists(con,o,s,v,"exon")) 
                         stop("Exon annotation for ",o," from ",s," version ",v,
                             " is required in order to build predefined merged ",
                             "exon regions for RNA-Seq (exon) coverage ",
-                            "calculations. Please rerun the ",
+                            "calculations.\nPlease rerun the ",
                             "buildAnnotationStore function with appropriate ",
                             "parameters.")
-                    ex <- load(file.path(storePath,"exon.rda"))
-                    annGr <- unlist(exon,use.names=FALSE)
+                            
+                    annGr <- .loadPrebuiltAnnotation(con,o,s,v,"exon")
                     message("Merging exons for ",o," from ",s," version ",v)
-                    annList <- reduceExons(annGr,rc=rc)
-                    annGr <- annList$model
-                    names(annGr) <- as.character(annGr$exon_id)
-                    sexon <- split(annGr,annGr$gene_id)
+                    annList <- reduceExons(annGr)
+                    ann <- as.data.frame(annList$model)
+                    ann <- ann[,c(1:3,6,7,5,8,9)]
+                    names(ann)[1] <- "chromosome"
+                    ann$chromosome <- as.character(ann$chromosome)
+                    ann <- ann[order(ann$chromosome,ann$start),]
+                    nr <- .dropAnnotation(con,o,s,v,"summarized_exon")
+                    nr <- .insertContent(con,o,s,v,"summarized_exon")
+                    nid <- .annotationExists(con,o,s,v,"summarized_exon",
+                        out="id")
+                    ann$content_id <- rep(nid,nrow(ann))
+                    sfSumExon <- sf
+                    sfSumExon$content_id <- rep(nid,nrow(sfSumExon))
+                    dbWriteTable(con,"summarized_exon",ann,row.names=FALSE,
+                        append=TRUE)
+                    dbWriteTable(con,"seqinfo",sfSumExon,row.names=FALSE,
+                        append=TRUE)        
+                            
                     activeLength <- annList$length
-                    names(activeLength) <- names(sexon)
-                    save(sexon,activeLength,
-                        file=file.path(storePath,"summarized_exon.rda"),
-                        compress=TRUE)
-                }
-                
-                # Then pre-create a set of flanking regions because it takes 
-                # ages if we do it on-the-fly (inefficient, for the time being, 
-                # XXapply functions are very slow)
-                # Define flanking areas
-                flanks <- list(
-                    "F500"=c(500,500),
-                    "F1000"=c(1000,1000),
-                    "F2000"=c(2000,2000),
-                    "F5000"=c(5000,5000)
-                )
-                # Load helper ranges from gene file if it exists, otherwise stop
-                # and prompt user to rerun
-                if (!file.exists(file.path(storePath,"summarized_exon.rda")))
-                    stop("Summarized exon annotation for ",o," from ",s,
-                        " version ",v," is required in order to build ",
-                        "predefined regions for RNA-Seq (exon) coverage ",
-                        "calculations. Please rerun the buildAnnotationStore ",
-                        "function with appropriate parameters.")
-                
-                #gg <- load(file.path(storePath,"gene.rda"))
-                ee <- load(file.path(storePath,"summarized_exon.rda"))
-                #helperRanges <- gene
-                genomeRanges <- sexon
-                for (nf in names(flanks)) {
-                    if (file.exists(file.path(storePath,paste0(
-                        "summarized_exon_",nf,".rda"))) && !forceDownload) {
-                        message("Summarized exon annotation for ",o," from ",s,
-                        " version ",v," with flanking region ",nf," for ",
-                        "RNA-Seq data has already been created and will be ",
-                        "skipped. If you wish to recreate it choose ",
-                        "forceDownload = TRUE.")
-                        next
-                    }
-                    message("Creating summarized exon flanking region ",nf)
-                    f <- flanks[[nf]]
-                    if (is.null(rc)) {
-                        flankedSexon <- lapply(genomeRanges,flankFirstLast,
-                            f[1],f[2],rc=rc)
-                    }
-                    else
-                        flankedSexon <- cmclapply(genomeRanges,flankFirstLast,
-                            f[1],f[2],rc=rc)
-                    names(flankedSexon) <- names(genomeRanges)
-                    flankedSexon <- GRangesList(flankedSexon)
-                    save(flankedSexon,file=file.path(storePath,paste0(
-                        "summarized_exon_",nf,".rda")),compress=TRUE)
+                    nr <- .dropAnnotation(con,o,s,v,"active_length")
+                    nr <- .insertContent(con,o,s,v,"active_length")
+                    nid <- .annotationExists(con,o,s,v,"active_length",
+                        out="id")
+                    active <- data.frame(
+                        name=names(activeLength),
+                        length=activeLength,
+                        content_id=rep(nid,length(activeLength))
+                    )
+                    dbWriteTable(con,"active_length",active,row.names=FALSE,
+                        append=TRUE)
                 }
             }
         }
     }
+    
+    dbDisconnect(con)
+}
+
+# GTF only!
+buildCustomAnnotation <- function(gtfFile,metadata,
+    db=file.path(system.file(package="recoup"),"annotation.sqlite"),
+    rewrite=TRUE) {
+    # Check metadata
+    if (is.null(metadata$organism))
+        stop("An organism name must be provided with metadata!")
+    if (is.null(metadata$source)) {
+        warning("A source should be provided with metadata! Using 'inhouse'...",
+            immediate.=TRUE)
+        metadata$source <- "inhouse"
+    }
+    if (is.null(metadata$version)) {
+        warning("A version should be provided with metadata! Using today...",
+            immediate.=TRUE)
+        metadata$version <- format(Sys.Date(),"%Y%m%d")
+    }
+    if (is.null(metadata$chromInfo)) {
+        warning("Chromosomal lengths should be provided with metadata! ",
+            "Only chromosome names will be available... ",immediate.=TRUE)
+        metadata$chromInfo <- NULL
+    }
+    else {
+        str <- metadata$chromInfo
+        if (is.character(str)) {
+            out <- tryCatch(open(Rsamtools::BamFile(str)),error=function(e) e)
+            if (inherits(out,"error")) # Not a BAM file, try to read.delim
+                metadata$chromInfo <- read.delim(str,row.names=1)
+            else
+                metadata$chromInfo <- .chromInfoFromBAM(str)
+        }
+        if (!is.data.frame(metadata$chromInfo))
+            stop("metadata$chromInfo must be a data frame!")
+    }
+    
+    # Check database path
+    if (!dir.exists(dirname(db)))
+        dir.create(dirname(db),recursive=TRUE,mode="0755")
+    
+    # Initialize or open the annotation SQLite datatabase
+    message("Opening recoup SQLite database ",db)
+    con <- initDatabase(db)
+    
+    parsed <- parseCustomGtf(gtfFile)
+    
+    s <- metadata$source
+    o <- metadata$organism
+    v <- metadata$version
+        
+    # Retrieve gene annotations
+    if (.annotationExists(con,o,s,v,"gene") && !rewrite)
+        message("Gene annotation for ",o," from ",s," version ",v," has ",
+            "already been created and will be skipped.\nIf you wish to ",
+            "recreate it choose rewrite = TRUE.")
+    else {
+        message("Retrieving gene annotation for ",o," from ",s," version ",v,
+            " from ",gtfFile)
+        ann <- annotationFromCustomGtf(parsed,level="gene",type="gene",
+            asdf=TRUE)
+        nr <- .dropAnnotation(con,o,s,v,"gene")
+        nr <- .insertContent(con,o,s,v,"gene",1)
+        nid <- .annotationExists(con,o,s,v,"gene",out="id")
+        ann$content_id <- rep(nid,nrow(ann))
+        sfGene <- .chromInfoToSeqInfoDf(metadata$chromInfo)
+        sfGene$content_id <- rep(nid,nrow(sfGene))
+        dbWriteTable(con,"gene",ann,row.names=FALSE,append=TRUE)
+        dbWriteTable(con,"seqinfo",sfGene,row.names=FALSE,append=TRUE)
+    }
+    
+    # Retrieve 3' UTR annotations
+    if (.annotationExists(con,o,s,v,"utr") && !rewrite)
+        message("3' UTR annotation for ",o," from ",s," version ",v," has ",
+            "already been created and will be skipped.\nIf you wish to ",
+            "recreate it choose rewrite = TRUE.")
+    else {
+        message("Retrieving 3' UTR annotation for ",o," from ",s," version ",v)
+        ann <- annotationFromCustomGtf(parsed,level="gene",type="utr",asdf=TRUE)
+        if (nrow(ann) > 0) {
+            nr <- .dropAnnotation(con,o,s,v,"utr")
+            nr <- .insertContent(con,o,s,v,"utr",1)
+            nid <- .annotationExists(con,o,s,v,"utr",out="id")
+            ann$content_id <- rep(nid,nrow(ann))
+            sfUtr <- .chromInfoToSeqInfoDf(metadata$chromInfo)
+            sfUtr$content_id <- rep(nid,nrow(sfUtr))
+            dbWriteTable(con,"utr",ann,row.names=FALSE,append=TRUE)
+            dbWriteTable(con,"seqinfo",sfUtr,row.names=FALSE,append=TRUE)
+        }
+        else
+            message("3' UTR annotation for ",o," from ",s," version ",v," is ",
+                "not available in the provided GTF file.")
+    }
+    
+    # Then summarize the 3'UTRs and write again with type sum_transcript
+    if (.annotationExists(con,o,s,v,"summarized_3utr") && !rewrite)
+        message("Summarized 3' UTR annotation for ",o," from ",s," version ",v,
+            " has already been created and will be skipped.\nIf you wish to ",
+            "recreate it choose rewrite = TRUE.")
+    else {
+        message("Retrieving summarized 3' UTR annotation per gene for ",o,
+            " from ",s," version ",v)
+        ann <- annotationFromCustomGtf(parsed,level="gene",type="utr",
+            summarized=TRUE,asdf=TRUE)
+        
+        if (nrow(ann) > 0) {
+            activeLength <- attr(ann,"activeLength")
+            
+            nr <- .dropAnnotation(con,o,s,v,"summarized_3utr")
+            nr <- .insertContent(con,o,s,v,"summarized_3utr",1)
+            nid <- .annotationExists(con,o,s,v,"summarized_3utr",out="id")
+            ann$content_id <- rep(nid,nrow(ann))
+            sfSumUtr <- .chromInfoToSeqInfoDf(metadata$chromInfo)
+            sfSumUtr$content_id <- rep(nid,nrow(sfSumUtr))
+            dbWriteTable(con,"summarized_3utr",ann,row.names=FALSE,append=TRUE)
+            dbWriteTable(con,"seqinfo",sfSumUtr,row.names=FALSE,append=TRUE)
+            
+            nr <- .dropAnnotation(con,o,s,v,"active_utr_length")
+            nr <- .insertContent(con,o,s,v,"active_utr_length",1)
+            nid <- .annotationExists(con,o,s,v,"active_utr_length",out="id")
+            active <- data.frame(
+                name=names(activeLength),
+                length=activeLength,
+                content_id=rep(nid,length(activeLength))
+            )
+            dbWriteTable(con,"active_utr_length",active,row.names=FALSE,
+                append=TRUE)
+        }
+        else
+            message("3' UTR annotation for ",o," from ",s," version ",v," is ",
+                "not available in the provided GTF file.")
+    }
+    
+    # Retrieve exon annotations
+    if (.annotationExists(con,o,s,v,"exon") && !rewrite)
+        message("Exon annotation for ",o," from ",s," version ",v," has ",
+            "already been created and will be skipped.\nIf you wish to ",
+            "recreate it choose rewrite = TRUE.")
+    else {
+        message("Retrieving exon annotation for ",o," from ",s," version ",v)
+        ann <- annotationFromCustomGtf(parsed,level="exon",type="exon",
+            asdf=TRUE)
+        nr <- .dropAnnotation(con,o,s,v,"exon")
+        nr <- .insertContent(con,o,s,v,"exon",1)
+        nid <- .annotationExists(con,o,s,v,"exon",out="id")
+        ann$content_id <- rep(nid,nrow(ann))
+        sfExon <- .chromInfoToSeqInfoDf(metadata$chromInfo)
+        sfExon$content_id <- rep(nid,nrow(sfExon))
+        dbWriteTable(con,"exon",ann,row.names=FALSE,append=TRUE)
+        dbWriteTable(con,"seqinfo",sfExon,row.names=FALSE,append=TRUE)
+    }
+    
+    # Then summarize the exons and write again with type sum_exon
+    if (.annotationExists(con,o,s,v,"summarized_exon") && !rewrite)
+        message("Summarized exon annotation for ",o," from ",s," version ",v,
+            " has already been created and will be skipped.\nIf you wish to ",
+            "to recreate it choose rewrite = TRUE.")
+    else {
+        message("Retrieving summarized exon annotation for ",o," from ",s,
+            " version ",v)
+        ann <- annotationFromCustomGtf(parsed,level="gene",type="exon",
+            summarized=TRUE,asdf=TRUE)
+        activeLength <- attr(ann,"activeLength")
+        
+        nr <- .dropAnnotation(con,o,s,v,"summarized_exon")
+        nr <- .insertContent(con,o,s,v,"summarized_exon",1)
+        nid <- .annotationExists(con,o,s,v,"summarized_exon",out="id")
+        ann$content_id <- rep(nid,nrow(ann))
+        sfSumExon <- .chromInfoToSeqInfoDf(metadata$chromInfo)
+        sfSumExon$content_id <- rep(nid,nrow(sfSumExon))
+        dbWriteTable(con,"summarized_exon",ann,row.names=FALSE,append=TRUE)
+        dbWriteTable(con,"seqinfo",sfSumExon,row.names=FALSE,append=TRUE)
+
+        nr <- .dropAnnotation(con,o,s,v,"active_length")
+        nr <- .insertContent(con,o,s,v,"active_length",1)
+        nid <- .annotationExists(con,o,s,v,"active_length",out="id")
+        active <- data.frame(
+            name=names(activeLength),
+            length=activeLength,
+            content_id=rep(nid,length(activeLength))
+        )
+        dbWriteTable(con,"active_length",active,row.names=FALSE,append=TRUE)
+    }
+}
+
+.chromInfoFromBAM <- function(bam) {
+    # Danger of including non-canonical chromosomes
+    b <- scanBamHeader(bam)
+    ci <- as.data.frame(b[[bam]]$targets)
+    names(ci) <- "length"
+    return(ci)
+}
+
+.chromInfoFromSeqinfo <- function(sf) {
+    sf <- as.data.frame(sf)
+    sf <- sf[,1,drop=FALSE]
+    names(sf) <- "length"
+    return(sf)
+}
+
+# Load annotation must be capable of reading custom annotation files if imported
+# with metaseqR facilities
+loadAnnotation <- function(genome,refdb,type=c("gene","exon","utr"),
+    version="auto",db=file.path(system.file(package="recoup"),
+    "annotation.sqlite"),summarized=FALSE,asdf=FALSE,rc=NULL) {
+    if (!requireNamespace("RSQLite"))
+        stop("R package RSQLite is required to load annotation from database!")
+    
+    type <- type[1]
+    checkTextArgs("type",type,c("gene","exon","utr"),multiarg=FALSE)
+    if (version != "auto")
+        checkNumArgs("version",version,"numeric")
+    
+    # Check if local storage has been set
+    onTheFly <- FALSE
+    if (file.exists(db)) {
+        # Open the connection
+        drv <- dbDriver("SQLite")
+        con <- dbConnect(drv,dbname=db)
+        
+        # Is the general resource (organism, source) installed?
+        if (!.annotationExists(con,genome,refdb)) {
+            warning("The requested annotation does not seem to exist in the ",
+                "database! It will be loaded on the fly.\nConsider importing ",
+                "it by using buildAnnotationDatabase.")
+            onTheFly <- TRUE
+        }
+        
+        # If main source exists, decide on version
+        if (!onTheFly) {
+            if (version != "auto") {
+                if (!.annotationExists(con,genome,refdb,version,
+                    .annotationTypeFromInputArgs(type))) {
+                    warning("The requested annotation version does not seem ",
+                        "to exist! Have you run buildAnnotationDatabase or ",
+                        "possibly mispelled? Will use newest existing version.",
+                        immediate.=TRUE)
+                    version <- "auto"
+                }
+            }
+            if (version == "auto") {
+                # Check if annotation exists, has been performed before
+                vers <- .installedVersions(con,genome,refdb)
+                vers <- sort(vers,decreasing=TRUE)
+                version <- vers[1]
+            }
+            ann <- .loadPrebuiltAnnotation(con,genome,refdb,version,type,
+                summarized)
+            dbDisconnect(con)
+            
+            if (asdf) {
+                a <- attr(ann,"activeLength")
+                ann <- as.data.frame(unname(ann))
+                ann <- ann[,c(1:3,6,7,5,8,9)]
+                names(ann)[1] <- "chromosome"
+                if (!is.null(a))
+                    attr(ann,"activeLength") <- a
+                return(ann)
+            }
+            else
+                return(ann)
+        }
+    }
+    else
+        onTheFly <- TRUE
+        
+    if (onTheFly) {
+        if (genome %in% getSupportedOrganisms()
+            && refdb %in% getSupportedRefDbs()) {
+            message("Getting latest annotation on the fly for ",genome," from ",
+                refdb)
+            ann <- .loadAnnotationOnTheFly(genome,refdb,type,rc)
+            if (asdf) {
+                a <- attr(ann,"activeLength")
+                ann <- as.data.frame(unname(ann))
+                ann <- ann[,c(1:3,6,7,5,8,9)]
+                names(ann)[1] <- "chromosome"
+                if (!is.null(a))
+                    attr(ann,"activeLength") <- a
+                return(ann)
+            }
+            else
+                return(ann)
+        }
+        else {
+            stop("genome and refdb not in supported automatically download ",
+                "annotation options. Please use importCustomAnnotation.")
+        }
+    }
+}
+
+.loadPrebuiltAnnotation <- function(con,genome,refdb,version,type,
+    summarized=FALSE) {
+    metaType <- .annotationTypeFromInputArgs(type,summarized)
+    cid <- .annotationExists(con,genome,refdb,version,metaType,out="id")
+    if (metaType == "summarized_exon")
+        tName <- "active_length"
+    else if (metaType == "summarized_3utr")
+        tName <- "active_utr_length"
+    cida <- .annotationExists(con,genome,refdb,version,"active_length",out="id")
+        
+    querySet <- .makeAnnotationQuerySet(metaType,cid,cida)
+    
+    preAnn <- dbGetQuery(con,querySet$main)
+    preAnn$`_id` <- NULL
+    preAnn$content_id <- NULL
+    ann <- GRanges(preAnn)
+    seqlevels(ann) <- unique(preAnn$chromosome)
+    
+    preSf <- dbGetQuery(con,querySet$seqinfo)
+    preSf$`_id` <- NULL
+    preSf$content_id <- NULL
+    rownames(preSf) <- as.character(preSf[,1])
+    if (genome %in% getSupportedOrganisms())
+        sfg <- getUcscOrganism(genome)
+    else
+        sfg <- genome
+    sf <- Seqinfo(seqnames=preSf[,1],seqlengths=preSf[,2],
+        isCircular=rep(FALSE,nrow(preSf)),genome=sfg)
+    
+    if (length(sf) > 0) {
+        if (length(seqlevels(ann)) != length(seqlevels(sf)))
+            # If a subset, this is enough
+            seqinfo(ann) <- sf[intersect(seqlevels(ann),seqlevels(sf))]
+        else if (!all(seqlevels(ann) == seqlevels(sf))) {
+            # Must also be sorted in the same way
+            seqlevels(ann) <- seqlevels(sf)
+            seqinfo(ann) <- sf
+        }
+        else
+            seqinfo(ann) <- sf
+    }
+    
+    ann <- .nameAnnotationFromMetaType(ann,metaType)
+    
+    preActive <- NULL
+    if (!is.null(querySet$active)) {
+        preActive <- dbGetQuery(con,querySet$active)
+        preActive$`_id` <- NULL
+        preActive$content_id <- NULL
+        active <- as.integer(preActive$length)
+        names(active) <- as.character(preActive$name)
+        # FIXME: Will have to take care later of this
+        #active <- active[names(ann)]
+        attr(ann,"activeLength") <- active
+    }
+    
+    return(ann)
+}
+
+.loadAnnotationOnTheFly <- function(genome,refdb,type,rc=NULL) {
+    message("Retrieving genome information for ",genome," from ",refdb)
+    sf <- getSeqInfo(genome,asSeqinfo=TRUE)
+    
+    switch(type,
+        gene = {
+            message("Retrieving latest gene annotation for ",genome,
+                " from ",refdb)
+            ann <- getAnnotation(genome,"gene",refdb=refdb,rc=rc)
+            annGr <- makeGRangesFromDataFrame(
+                df=ann,
+                seqinfo=sf,
+                keep.extra.columns=TRUE,
+                seqnames.field="chromosome"
+            )
+            names(annGr) <- as.character(annGr$gene_id)
+        },
+        exon = {
+            message("Retrieving latest exon annotation for ",genome,
+                " from ",refdb)
+            ann <- getAnnotation(genome,"exon",refdb=refdb,rc=rc)
+            tmpGr <- makeGRangesFromDataFrame(
+                df=ann,
+                seqinfo=sf,
+                keep.extra.columns=TRUE,
+                seqnames.field="chromosome"
+            )
+            message("Merging exons for ",genome," from ",refdb)
+            annList <- reduceExons(tmpGr)
+            annGr <- annList$model
+            names(annGr) <- as.character(annGr$exon_id)
+            activeLength <- annList$length
+            names(activeLength) <- unique(annGr$gene_id)
+            attr(annGr,"activeLength") <- activeLength
+        },
+        utr = {
+            message("Retrieving latest 3' UTR annotation for ",genome,
+                " from ",refdb)
+            ann <- getAnnotation(genome,"utr",refdb=refdb,rc=rc)
+            tmpGr <- makeGRangesFromDataFrame(
+                df=ann,
+                seqinfo=sf,
+                keep.extra.columns=TRUE,
+                seqnames.field="chromosome"
+            )
+            message("Merging 3' UTRs for ",genome," from ",refdb)
+            annList <- reduceExons(tmpGr)
+            annGr <- annList$model
+            names(annGr) <- as.character(annGr$transcript_id)
+            activeLength <- annList$length
+            names(activeLength) <- unique(annGr$gene_id)
+            attr(annGr,"activeLength") <- activeLength
+        }
+    )
+    
+    return(annGr)
+}
+
+.nameAnnotationFromMetaType <- function(ann,type) {
+    switch(type,
+        gene = {
+            names(ann) <- as.character(ann$gene_id)
+        },
+        summarized_exon = {
+            names(ann) <- as.character(ann$exon_id)
+        },
+        exon = {
+            names(ann) <- as.character(ann$exon_id)
+        },
+        summarized_3utr = {
+            names(ann) <- as.character(ann$transcript_id)
+        },
+        utr = {
+            names(ann) <- as.character(ann$transcript_id)
+        }
+    )
+    return(ann)
+}
+
+.annotationTypeFromInputArgs <- function(type,summarized=FALSE) {    
+    switch(type,
+        gene = {
+            return("gene")
+        },
+        exon = {
+            if (summarized)
+                return("summarized_exon")
+            else
+                return("exon")
+        },
+        utr = {
+            if (summarized)
+                return("summarized_3utr")
+            else
+                return("utr")
+        }
+    )
+}
+
+importCustomAnnotation <- function(gtfFile,metadata,
+    type=c("gene","exon","utr")) {
+    type <- tolower(type[1])
+    # Check metadata
+    if (is.null(metadata$organism)) {
+        tmpOrg <- paste("species",format(Sys.Date(),"%Y%m%d"),sep="_")
+        warning("An organism name must be provided with metadata for ",
+            "reporting purposes! Using ",tmpOrg,immediate.=TRUE)
+        metadata$organism <- tmpOrg
+    }
+
+    if (is.null(metadata$source)) {
+        tmpSource <- paste("source",format(Sys.Date(),"%Y%m%d"),sep="_")
+        warning("A source should be provided with metadata for reporting ",
+            "purposes ! Using ",tmpSource,immediate.=TRUE)
+        metadata$source <- tmpSource
+    }
+    if (is.null(metadata$version)) {
+        tmpVer <- paste("version",format(Sys.Date(),"%Y%m%d"),sep="_")
+        warning("A version should be provided with metadata for reporting ",
+            "purposes! Using ",tmpVer,imemdiate.=TRUE)
+        metadata$version <- tmpVer
+    }
+    if (is.null(metadata$chromInfo)) {
+        warning("Chromosomal lengths should be provided with metadata! ",
+            "Only chromosome names will be available... ",immediate.=TRUE)
+        metadata$chromInfo <- NULL
+    }
+    else {
+        str <- metadata$chromInfo
+        if (is.character(str) && file.exists(str)) {
+            out <- tryCatch(open(Rsamtools::BamFile(str)),error=function(e) e)
+            if (inherits(out,"error")) # Not a BAM file, try to read.delim
+                metadata$chromInfo <- read.delim(str,row.names=1)
+            else
+                metadata$chromInfo <- .chromInfoFromBAM(str)
+        }
+        if (!is.data.frame(metadata$chromInfo))
+            stop("metadata$chromInfo must be a data frame!")
+    }
+    
+    # For display meta information
+    s <- metadata$source
+    o <- metadata$organism
+    v <- metadata$version
+    
+    # Parse the GTF file... If something wrong, it will crash here
+    parsed <- parseCustomGtf(gtfFile)
+    
+    switch(type,
+        gene = {
+            message("Retrieving gene annotation for ",o," from ",s,
+                " version ",v," from ",gtfFile)
+            annGr <- annotationFromCustomGtf(parsed,type="gene")
+        },
+        exon = {
+            message("Retrieving summarized exon annotation for ",o,
+                " from ",s," version ",v," from ",gtfFile)
+            annGr <- annotationFromCustomGtf(parsed,type="exon",
+                summarized=TRUE)
+        },
+        utr = {
+            message("Retrieving summarized 3' UTR annotation per gene ",
+                "for ",o," from ",s," version ",v," from ",gtfFile)
+            annGr <- annotationFromCustomGtf(parsed,type="utr",
+                summarized=TRUE)
+        }
+    )
+    
+    return(annGr)
+}
+
+.validateDbCon <- function(obj) {
+    # obj can be an already opened connection or the db file or missing. In the
+    # latter case, the function looks at the package filesystem location
+    if (is.null(obj)) {
+        db <- file.path(system.file(package="metaseqR"),"annotation.sqlite")
+        drv <- dbDriver("SQLite")
+        con <- tryCatch(dbConnect(drv,dbname=db),error=function(e) {
+            message("Caught error: ",e)
+            stop("Have you constructed the metaseqR annotation database?")
+        },finally="")
+    }
+    if (file.exists(obj)) {
+        drv <- dbDriver("SQLite")
+        con <- tryCatch(dbConnect(drv,dbname=obj),error=function(e) {
+            message("Caught error: ",e)
+            stop("Is obj an SQLite database?")
+        },finally="")
+    }
+    else if (is(obj,"SQLiteConnection"))
+        con <- obj
+    return(con)
+}
+
+getInstalledAnnotations <- function(obj=NULL) {
+    con <- .validateDbCon(obj)
+    content <- .browseContent(con)
+    dbDisconnect(con)   
+    return(content[,-1])
+}
+
+getUserAnnotations <- function(obj=NULL) {
+    con <- .validateDbCon(obj)
+    userContent <- .browseUserContent(con)
+    dbDisconnect(con)
+    return(userContent[,-1])
 }
 
 correctTranscripts <- function(ann) {
@@ -230,40 +813,188 @@ correctTranscripts <- function(ann) {
     return(ann)
 }
 
-reduceExons <- function(gr,rc=NULL) {
+reduceTranscripts <- function(gr) {
+    # Get the gene ids to use as split factor
     gene <- unique(as.character(gr$gene_id))
-    if (!is.null(gr$gene_name))
-        gn <- gr$gene_name
-    else
-        gn <- NULL
-    if (!is.null(gr$biotype))
-        bt <- gr$biotype   
-    else
-        bt <- NULL
-    red.list <- cmclapply(gene,function(x,a,g,b) {
-        tmp <- a[a$gene_id==x]
-        if (!is.null(g))
-            gena <- as.character(tmp$gene_name[1])
-        if (!is.null(b))
-            btty <- as.character(tmp$biotype[1])
-        merged <- reduce(tmp)
-        n <- length(merged)
-        meta <- DataFrame(
-            exon_id=paste(x,"MEX",1:n,sep="_"),
-            gene_id=rep(x,n)
-        )
-        if (!is.null(g))
-            meta$gene_name <- rep(gena,n)
-        if (!is.null(b))
-            meta$biotype <- rep(btty,n)
-        mcols(merged) <- meta
-        return(merged)
-    },gr,gn,bt,rc=rc)
-    len <- unlist(cmclapply(red.list,function(x) {
-        return(sum(width(x)))
-    },rc=rc))
-    names(len) <- names(red.list)
-    return(list(model=do.call("c",red.list),length=len))
+    
+    # Get the GRanges metadata to create a map for later
+    meta <- elementMetadata(gr)
+    if (is.null(gr$gene_name))
+        meta$gene_name <- meta$gene_id
+    if (is.null(gr$biotype))
+        meta$biotype <- rep("gene",nrow(meta))
+    
+    # There will be a transcript_id
+    ir <- which(names(meta) == "transcript_id")
+    map <- meta[,-ir]
+    
+    # Remove duplicates and name the map
+    d <- which(duplicated(map))
+    if (length(d) > 0)
+        map <- map[-d,]
+    # In some cases, transcripts are recorded with multiple biotypes...
+    if (length(map$gene_id) != length(unique(map$gene_id))) {
+        mapp <- map
+        ir <- which(names(mapp) == "biotype")
+        mapp <- mapp[,-ir]
+        d <- which(duplicated(mapp))
+        if (length(d) > 0)
+            map <- map[-d,]
+    }
+    rownames(map) <- map$gene_id
+    map <- map[gene,]
+    
+    # Gene names and biotypes for later reconstruction
+    gn <- as.character(map$gene_name)
+    bt <- as.character(map$biotype)
+    
+    # Split the initial GRanges to apply rest operations
+    grList <- split(gr,gr$gene_id)
+    # Re-order for common reference with the map
+    grList <- grList[gene]
+    # Now, reduce to merge overlaping exons
+    grList <- reduce(grList)
+    
+    # Start the reconstruction by getting new lengths and create names
+    lens <- lengths(grList)
+    inds <- unlist(lapply(lens,function(j) return(1:j)),use.names=FALSE)
+    grNew <- unname(unlist(grList))
+    gene_id <- rep(gene,lens)
+    transcript_id <- paste(gene_id,"MET",inds,sep="_")
+    gene_name <- rep(gn,lens)
+    biotype <- rep(bt,lens)
+    newMeta <- DataFrame(
+        transcript_id=transcript_id,
+        gene_id=gene_id,
+        gene_name=gene_name,
+        biotype=biotype
+    )
+    mcols(grNew) <- newMeta
+    
+    # grNew is the GRanges to return. In order to get the activeLength, we split
+    # again per gene_id in a temp variable
+    tmp <- split(grNew,grNew$gene_id)
+    tmp <- tmp[gene]
+    len <- sapply(width(tmp),sum)
+    
+    #return(grNew)
+    return(list(model=grNew,length=len))
+}
+
+reduceTranscriptsUtr <- function(gr) {
+    # Get the transcript ids to use ordering element
+    trans <- unique(as.character(gr$transcript_id))
+    
+    # Get the GRanges metadata to create a map for later
+    meta <- elementMetadata(gr)
+    if (is.null(gr$gene_name))
+        meta$gene_name <- meta$gene_id
+    if (is.null(gr$biotype))
+        meta$biotype <- rep("gene",nrow(meta))
+    
+    # Make the map and remove duplicates
+    map <- meta
+    d <- which(duplicated(map))
+    if (length(d) > 0)
+        map <- map[-d,,drop=FALSE]
+    rownames(map) <- map$transcript_id
+    map <- map[trans,]
+    
+    # Gene ids, names and biotypes for later reconstruction
+    gi <- as.character(map$gene_id)
+    gn <- as.character(map$gene_name)
+    bt <- as.character(map$biotype)
+    
+    # Split the initial GRanges to apply rest operations
+    grList <- split(gr,gr$transcript_id)
+    # Re-order for common reference with the map
+    grList <- grList[trans]
+    # Now, reduce to merge overlaping exons
+    grList <- reduce(grList)
+    
+    # Start the reconstruction by getting new lengths and create names
+    lens <- lengths(grList)
+    inds <- unlist(lapply(lens,function(j) return(1:j)),use.names=FALSE)
+    grNew <- unname(unlist(grList))
+    transcript_id <- paste(rep(trans,lens),"MEU",inds,sep="_")
+    gene_id <- rep(gi,lens)
+    gene_name <- rep(gn,lens)
+    biotype <- rep(bt,lens)
+    newMeta <- DataFrame(
+        transcript_id=transcript_id,
+        #gene_id=gene_id,
+        gene_id=rep(trans,lens),
+        gene_name=gene_name,
+        biotype=biotype
+    )
+    mcols(grNew) <- newMeta
+    
+    # grNew is the GRanges to return. In order to get the activeLength, we split
+    # again per gene_id in a temp variable
+    tmp <- split(grNew,grNew$gene_id)
+    tmp <- tmp[trans]
+    len <- sapply(width(tmp),sum)
+    
+    #return(grNew)
+    return(list(model=grNew,length=len))
+}
+
+reduceExons <- function(gr) {
+    # Get the gene ids to use as split factor
+    gene <- unique(as.character(gr$gene_id))
+    
+    # Get the GRanges metadata to create a map for later
+    meta <- elementMetadata(gr)
+    if (is.null(gr$gene_name))
+        meta$gene_name <- meta$gene_id
+    if (is.null(gr$biotype))
+        meta$biotype <- rep("gene",nrow(meta))
+    
+    # There will be an exon_id
+    ir <- which(names(meta) == "exon_id")
+    map <- meta[,-ir]
+    
+    # Remove duplicates and name the map
+    d <- which(duplicated(map))
+    if (length(d) > 0)
+        map <- map[-d,]
+    rownames(map) <- map$gene_id
+    map <- map[gene,]
+    
+    # Gene names and biotypes for later reconstruction
+    gn <- as.character(map$gene_name)
+    bt <- as.character(map$biotype)
+    
+    # Split the initial GRanges to apply rest operations
+    grList <- split(gr,gr$gene_id)
+    # Re-order for common reference with the map
+    grList <- grList[gene]
+    # Now, reduce to merge overlaping exons
+    grList <- reduce(grList)
+    
+    # Start the reconstruction by getting new lengths and create names
+    lens <- lengths(grList)
+    inds <- unlist(lapply(lens,function(j) return(1:j)),use.names=FALSE)
+    grNew <- unname(unlist(grList))
+    gene_id <- rep(gene,lens)
+    exon_id <- paste(gene_id,"MEX",inds,sep="_")
+    gene_name <- rep(gn,lens)
+    biotype <- rep(bt,lens)
+    newMeta <- DataFrame(
+        exon_id=exon_id,
+        gene_id=gene_id,
+        gene_name=gene_name,
+        biotype=biotype
+    )
+    mcols(grNew) <- newMeta
+    
+    # grNew is the GRanges to return. In order to get the activeLength, we split
+    # again per gene_id in a temp variable
+    tmp <- split(grNew,grNew$gene_id)
+    tmp <- tmp[gene]
+    len <- sapply(width(tmp),sum)
+    
+    return(list(model=grNew,length=len))
 }
 
 getAnnotation <- function(org,type,refdb="ensembl",ver=NULL,rc=NULL) {
@@ -286,7 +1017,16 @@ getEnsemblAnnotation <- function(org,type,ver=NULL) {
 
     chrsExp <- paste("^",getValidChrs(org),"$",sep="",collapse="|")
     if (type=="gene") {
-        bm <- getBM(attributes=getGeneAttributes(org),mart=mart)
+        bm <- tryCatch(
+            getBM(attributes=getGeneAttributes(org),mart=mart),
+            error=function(e) {
+                message("Caught error: ",e)
+                message("This error is most probably related to httr package ",
+                    "internals! Using fallback solution...")
+                .myGetBM(attributes=getGeneAttributes(org),mart=mart)
+            },
+            finally=""
+        )
         ann <- data.frame(
             chromosome=paste("chr",bm$chromosome_name,sep=""),
             start=bm$start_position,
@@ -303,7 +1043,16 @@ getEnsemblAnnotation <- function(org,type,ver=NULL) {
         rownames(ann) <- ann$gene_id
     }
     else if (type=="transcript") {
-        bm <- getBM(attributes=getTranscriptAttributes(org),mart=mart)
+        bm <- tryCatch(
+            getBM(attributes=getTranscriptAttributes(org),mart=mart),
+            error=function(e) {
+                message("Caught error: ",e)
+                message("This error is most probably related to httr package ",
+                    "internals! Using fallback solution...")
+                .myGetBM(attributes=getTranscriptAttributes(org),mart=mart)
+            },
+            finally=""
+        )
         ann <- data.frame(
             chromosome=paste("chr",bm$chromosome_name,sep=""),
             start=bm$transcript_start,
@@ -318,7 +1067,16 @@ getEnsemblAnnotation <- function(org,type,ver=NULL) {
         rownames(ann) <- as.character(ann$transcript_id)
     }
     else if (type=="utr") {
-        bm <- getBM(attributes=get.transcript.utr.attributes(org),mart=mart)
+        bm <- tryCatch(
+            getBM(attributes=getTranscriptUtrAttributes(org),mart=mart),
+            error=function(e) {
+                message("Caught error: ",e)
+                message("This error is most probably related to httr package ",
+                    "internals! Using fallback solution...")
+                .myGetBM(attributes=getTranscriptUtrAttributes(org),mart=mart)
+            },
+            finally=""
+        )
         ann <- data.frame(
             chromosome=paste("chr",bm$chromosome_name,sep=""),
             start=bm$`3_utr_start`,
@@ -337,7 +1095,16 @@ getEnsemblAnnotation <- function(org,type,ver=NULL) {
             "strand","gene_name","biotype")]
     }
     else if (type=="exon") {
-        bm <- getBM(attributes=getExonAttributes(org),mart=mart)        
+        bm <- tryCatch(
+            getBM(attributes=getExonAttributes(org),mart=mart),
+            error=function(e) {
+                message("Caught error: ",e)
+                message("This error is most probably related to httr package ",
+                    "internals! Using fallback solution...")
+                .myGetBM(attributes=getExonAttributes(org),mart=mart)
+            },
+            finally=""
+        )
         ann <- data.frame(
             chromosome=paste("chr",bm$chromosome_name,sep=""),
             start=bm$exon_chrom_start,
@@ -381,58 +1148,82 @@ getUcscAnnotation <- function(org,type,refdb="ucsc",chunkSize=500,rc=NULL) {
 
     dbOrg <- getUcscOrganism(org)
     if (rmysqlPresent) {
-        dbCreds <- getUcscCredentials()
-        drv <- dbDriver("MySQL")
-        con <- dbConnect(drv,user=dbCreds[2],password=NULL,dbname=dbOrg,
-            host=dbCreds[1])
-        if (type == "transcript")
-            query <- getUcscQuery(org,"gene",refdb)
-        else
+        # The UTR case is handled later
+        if (type != "utr") {
+            dbCreds <- .getUcscCredentials()
+            drv <- dbDriver("MySQL")
+            con <- dbConnect(drv,user=dbCreds[2],password=NULL,dbname=dbOrg,
+                host=dbCreds[1])
             query <- getUcscQuery(org,type,refdb)
-        rawAnn <- dbGetQuery(con,query)
-        dbDisconnect(con)
+            rawAnn <- dbGetQuery(con,query)
+            dbDisconnect(con)
+        }
     }
     else {
         # This should return the same data frame as the db query
-        if (type == "transcript")
-            tmpSqlite <- getUcscDbl(org,"gene",refdb)
-        else
-            tmpSqlite <- getUcscDbl(org,type,refdb)
-        drv <- dbDriver("SQLite")
-        con <- dbConnect(drv,dbname=tmpSqlite)
-        query <- getUcscQuery(org,type,refdb)
-        rawAnn <- dbGetQuery(con,query)
-        dbDisconnect(con)
+        #if (type == "transcript")
+        #    tmpSqlite <- getUcscDbl(org,"gene",refdb)
+        #else if (type %in% c("gene","exon"))
+        #    tmpSqlite <- getUcscDbl(org,type,refdb)
+        
+        tmpSqlite <- getUcscDbl(org,refdb)
+        
+        if (type != "utr") { # Otherwise diect download is used
+            drv <- dbDriver("SQLite")
+            con <- dbConnect(drv,dbname=tmpSqlite)
+            query <- getUcscQuery(org,type,refdb)
+            rawAnn <- dbGetQuery(con,query)
+            dbDisconnect(con)
+        }
     }
     if (type=="gene") {
-        tmpAnn <- rawAnn
-        tmpAnn <- tmpAnn[grep(chrsExp,tmpAnn$chromosome,perl=TRUE),]
-        tmpAnn$chromosome <- as.character(tmpAnn$chromosome)
-        rownames(tmpAnn) <- tmpAnn$transcript_id
-        # Split the UCSC transcripts per gene name
-        tmp <- split(tmpAnn,tmpAnn$gene_name)
+        ann <- rawAnn
+        ann <- ann[grep(chrsExp,ann$chromosome,perl=TRUE),]
+        ann$chromosome <- as.character(ann$chromosome)
+        rownames(ann) <- ann$gene_id
+        #rownames(ann) <- ann$transcript_id
+        #tmpAnn <- rawAnn
+        #tmpAnn <- tmpAnn[grep(chrsExp,tmpAnn$chromosome,perl=TRUE),]
+        #tmpAnn$chromosome <- as.character(tmpAnn$chromosome)
+        #rownames(tmpAnn) <- tmpAnn$transcript_id
+        ## Split the UCSC transcripts per gene name
+        ##tmp <- split(tmpAnn,tmpAnn$gene_name)
         # Retrieve the longest transcript (as per Ensembl convention)
-        ann <- do.call("rbind",cmclapply(tmp,function(x) {
-            size <- x$end - x$start
-            selected <- which(size == max(size))
-            return(x[selected[1],,drop=FALSE])
-        },rc=rc))
-        names(ann)[4] <- "gene_id"
+        #ann <- do.call("rbind",cmclapply(tmp,function(x) {
+        #    size <- x$end - x$start
+        #    selected <- which(size == max(size))
+        #    return(x[selected[1],,drop=FALSE])
+        #},rc=rc))
+        #names(ann)[4] <- "gene_id"
         gcContent <- getGcContent(ann,org)
         ann$gc_content <- gcContent
+        # rownames are leftover from splitting above
+        rownames(ann) <- ann$gene_id
     }
     else if (type=="transcript") {
         ann <- rawAnn
         ann <- ann[grep(chrsExp,ann$chromosome,perl=TRUE),]
+        d <- which(duplicated(ann))
+        if (length(d) > 0)
+            ann <- ann[-d,]
         ann$chromosome <- as.character(ann$chromosome)
-        ann$gene_id <- ann$transcript_id
+        ann$transcript_id <- as.character(ann$transcript_id)
+        ann$gene_id <- as.character(ann$transcript_id)
+        # There are still duplicated transcript ids
+        d <- which(duplicated(ann$transcript_id))
+        iter <- 1
+        while(length(d) > 0) {
+            ann$transcript_id[d] <- paste(ann$transcript_id[d],iter,sep="_")
+            iter <- iter + 1
+            d <- which(duplicated(ann$transcript_id))
+        }
         rownames(ann) <- ann$transcript_id
-        ann <- ann[,c(1:4,9,6:8)]
+        ann <- ann[,c(1:4,8,5:7)]
     }
     else if (type=="exon") {
         rawAnn <- rawAnn[grep(chrsExp,rawAnn$chromosome,perl=TRUE),]
-        exList <- cmclapply(as.list(1:nrow(rawAnn)),function(x,d,s) {
-            r <- d[x,]
+        exList <- cmclapply(as.list(1:nrow(rawAnn)),function(x,d) {
+            r <- d[x,,drop=FALSE]
             starts <- as.numeric(strsplit(r[,"start"],",")[[1]])
             ends <- as.numeric(strsplit(r[,"end"],",")[[1]])
             nexons <- length(starts)
@@ -441,14 +1232,14 @@ getUcscAnnotation <- function(org,type,refdb="ucsc",chunkSize=500,rc=NULL) {
                 starts,ends,
                 paste(r[,"exon_id"],"_e",1:nexons,sep=""),
                 rep(r[,"strand"],nexons),
-                rep(r[,"transcript_id"],nexons),
+                rep(r[,"gene_id"],nexons),
                 rep(r[,"gene_name"],nexons),
                 rep(r[,"biotype"],nexons)
             )
             names(ret) <- names(r)
             rownames(ret) <- ret$exon_id
             return(ret)
-        },rawAnn,validChrs,rc=rc)
+        },rawAnn,rc=rc)
         
         # For some reason rbind takes ages for large datasets... We have to 
         # split in chunks of 1000
@@ -477,16 +1268,103 @@ getUcscAnnotation <- function(org,type,refdb="ucsc",chunkSize=500,rc=NULL) {
             start=tmpAnn$start,
             end=tmpAnn$end,
             exon_id=as.character(tmpAnn$exon_id),
-            gene_id=as.character(tmpAnn$transcript_id),
+            gene_id=as.character(tmpAnn$gene_id),
             strand=as.character(tmpAnn$strand),
             gene_name=as.character(tmpAnn$gene_name),
             biotype=as.character(tmpAnn$biotype)
         )
         rownames(ann) <- ann$exon_id
     }
+    else if (type=="utr") {
+        # We are already supposed to have the necessary elements to construct
+        # the required data frame. Should be something like
+        # 1. Read the GTF as TxDb
+        # 2. Import the GTF with rtracklayer
+        # 3. Call the 3UTR function of TxDb on (1)
+        # 4. Construct a map to add gene_name and other things (essentially
+        #    the biotype if we make it, if not we have to connect it from the
+        #    respective gene annotation during the pipeline execution)
+        # 5. Add the mapped elements to the GRanges/data.frame
+        # 6. Return a data.frame
+        #
+        # All the process is streamlined in getUcscUtr function
+        
+        preAnn <- getUcscUtr(org,refdb)
+        preAnn <- as.data.frame(preAnn)
+        preAnn <- preAnn[,c(1:3,6,7,5,8,9)]
+        preAnn <- preAnn[grep(chrsExp,preAnn$seqnames,perl=TRUE),]
+        names(preAnn) <- c("chromosome","start","end","transcript_id","gene_id",
+            "strand","gene_name","biotype")
+        # preAnn now has exon names as rownames... OK...
+        #rownames(preAnn) <- paste("T",1:nrow(preAnn),sep="_")
+        ann <- preAnn
+    }
     
     ann <- ann[order(ann$chromosome,ann$start),]
     return(ann)
+}
+
+getUcscUtr <- function(org,refdb="ucsc") {
+    org <- tolower(org[1])
+    refdb <- tolower(refdb[1])
+    checkTextArgs("org",org,getSupportedOrganisms(),multiarg=FALSE)
+    checkTextArgs("refdb",refdb,getSupportedUcscDbs())
+    
+    if (!requireNamespace("GenomicFeatures"))
+        stop("Bioconductor package GenomicFeatures is required!")
+    
+    httpBase <- paste("http://hgdownload.soe.ucsc.edu/goldenPath/",
+        getUcscOrganism(org),"/database/",sep="")
+    tableUtr <- getUcscTableNameUtr(org,refdb) # Need one table
+    message("  Retrieving table ",tableUtr," for 3'UTR annotation generation ",
+        "from ",refdb," for ",org)
+    download.file(paste(httpBase,tableUtr,sep=""),file.path(tempdir(),
+        paste(tableUtr,".txt.gz",sep="")),quiet=TRUE)
+    
+    # Do the conversion stuff. AS there is no easy way to check if genePredToGtf
+    # exists in the system, we should download it on the fly (once for the 
+    # session). If no Linux machine, then problem.
+    genePredToGtf <- file.path(tempdir(),"genePredToGtf")
+    if (!file.exists(file.path(tempdir(),"genePredToGtf"))) {
+        message("  Retrieving genePredToGtf tool")
+        download.file(
+        "http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/genePredToGtf",
+            genePredToGtf,quiet=TRUE
+        )
+        system(paste("chmod 775",genePredToGtf))
+    }
+    
+    # Then do the conversion... No need for windows case as Kent tools do not
+    # work in Windows anyway
+    gtfFile <- file.path(tempdir(),paste(tableUtr,".gtf",sep=""))
+    message("  Converting ",tableUtr," to GTF")
+    tmpName <- file.path(tempdir(),paste(format(Sys.time(),"%Y%m%d%H%M%S"),
+        "tgtf",sep="."))
+    commandUcsc <- paste(
+        "zcat ",file.path(tempdir(),paste(tableUtr,".txt.gz",sep=""))," | ",
+        "cut -f1-10 - | ",genePredToGtf," file stdin ",tmpName," -source=",
+        tableUtr," -utr && grep -vP '\t\\.\t\\.\t' ",tmpName," > ",gtfFile,
+        sep=""
+    )
+    commandRefSeq <- paste(
+        "zcat ",file.path(tempdir(),paste(tableUtr,".txt.gz",sep=""))," | ",
+        "cut -f2- | ",genePredToGtf," file stdin ",tmpName," -source=",
+        tableUtr," -utr && grep -vP '\t\\.\t\\.\t' ",tmpName," > ",gtfFile,
+        sep=""
+    )
+    command <- commandRefSeq
+    # There is an exception for organisms that do not exist in UCSC databases
+    # so we must use RefSeq
+    ucscUnsup <- c("rn5","rn6","dm3","dm6","danrer7","danrer10","danrer11",
+        "pantro4","pantro5","susscr3","susscr11","equcab2")
+    if (refdb == "ucsc" && !(org %in% ucscUnsup))
+        command <- commandUcsc
+    
+    # Run the command and process the data
+    message("Executing: ",command)
+    system(command)
+    parsed <- parseCustomGtf(gtfFile)
+    return(.makeGeneUtrFromTxDb(parsed$txdb,parsed$map,asdf=FALSE))
 }
 
 getGcContent <- function(ann,org) {
@@ -497,32 +1375,62 @@ getGcContent <- function(ann,org) {
     checkTextArgs("org",org,getSupportedOrganisms(),multiarg=FALSE)
     # Convert annotation to GRanges
     message("Converting annotation to GenomicRanges object...")
-    if (packageVersion("GenomicRanges")<1.14)
-        annGr <- GRanges(
-            seqnames=Rle(ann[,1]),
-            ranges=IRanges(start=ann[,2],end=ann[,3]),
-            strand=Rle(ann[,6]),
-            name=as.character(ann[,4])
-        )
-    else
-        annGr <- makeGRangesFromDataFrame(
-            df=ann,
-            keep.extra.columns=TRUE,
-            seqnames.field="chromosome"
-        )
+    annGr <- tryCatch(GRanges(ann),error=function(e) {
+        if (packageVersion("GenomicRanges")<1.14)
+            return(GRanges(
+                seqnames=Rle(ann[,1]),
+                ranges=IRanges(start=ann[,2],end=ann[,3]),
+                strand=Rle(ann[,6]),
+                name=as.character(ann[,4])
+            ))
+        else
+            return(makeGRangesFromDataFrame(
+                df=ann,
+                keep.extra.columns=TRUE,
+                seqnames.field="chromosome"
+            ))
+    },finaly="")
+    
     bsg <- loadBsGenome(org)
-    if (!is.na(bsg)) {
+    if (is(bsg,"BSgenome")) {
         message("Getting DNA sequences...")
-        seqs <- getSeq(bsg,names=annGr)
-        message("Getting GC content...")
-        freqMatrix <- alphabetFrequency(seqs,as.prob=TRUE,baseOnly=TRUE)
-        gcContent <- apply(freqMatrix,1,function(x) round(100*sum(x[2:3]),
-            digits=2))
+        seqs <- tryCatch(getSeq(bsg,names=annGr),error=function(e) {
+            warning("Caught error ",e,immediate.=TRUE)
+            message("Cannot get ",org," sequences! Returning NA GC content...")
+            return(NA)
+        },finally="")
+        if (!is.na(seqs[1])) {
+            message("Getting GC content...")
+            freqMatrix <- alphabetFrequency(seqs,as.prob=TRUE,baseOnly=TRUE)
+            gcContent <- apply(freqMatrix,1,function(x) round(100*sum(x[2:3]),
+                digits=2))
+        }
+        else
+            gcContent <- rep(NA,nrow(ann))
     }
     else
         gcContent <- rep(NA,nrow(ann))
     names(gcContent) <- as.character(ann[,4])
     return(gcContent)
+}
+
+getSeqInfo <- function(org,asSeqinfo=FALSE) {
+    sf <- tryCatch(GenomeInfoDb::fetchExtendedChromInfoFromUCSC(
+        getUcscOrganism(org)),error=function(e) {
+            message("GenomeInfoDb::fetchExtendedChromInfoFromUCSC ",
+                "failed with the following error: ")
+            message(e)
+            message("")
+            message("Trying a direct download...")
+            getChromInfo(getUcscOrganism(org))
+        },finally="")
+    rownames(sf) <- as.character(sf[,1])
+    sf <- sf[getValidChrs(org),]
+    if (asSeqinfo)
+        return(Seqinfo(seqnames=sf[,1],seqlengths=sf[,2],
+            isCircular=sf[,3],genome=getUcscOrganism(org)))
+    else
+        return(data.frame(chromosome=sf[,1],length=as.integer(sf[,2])))
 }
 
 getUcscOrganism <- function(org) {
@@ -535,13 +1443,14 @@ getUcscOrganism <- function(org) {
         rn5 = { return("rn5") },
         rn6 = { return("rn6") },
         dm3 = { return("dm3") },
-        dm6 = { return("dm3") },
+        dm6 = { return("dm6") },
         danrer7 = { return("danRer7") },
         danrer10 = { return("danRer10") },
+        danrer11 = { return("danRer11") },
         pantro4 = { return("panTro4") },
         pantro5 = { return("panTro5") },
         susscr3 = { return("susScr3") },
-        susscr11 = { return("susScr3") },
+        susscr11 = { return("susScr11") },
         equcab2 = { return("equCab2") },
         tair10 = { return("TAIR10") }
     )
@@ -577,20 +1486,17 @@ getBsOrganism <- function(org) {
             return("BSgenome.Dmelanogaster.UCSC.dm6")
         },
         danrer7 = {
-            #warning("danRer7 is not supported by BSgenome! Please use ",
-            #    "Ensembl as annotation source if GC content is important.",
-            #    immediate.=TRUE)
-            #return(NA)
-            # Is default for refseq for some reason...
             return("BSgenome.Drerio.UCSC.danRer7")
         },
         danrer10 = {
-            #warning("danRer10 is not supported by BSgenome! Please use ",
-            #    "Ensembl as annotation source if GC content is important.",
-            #    immediate.=TRUE)
-            #return(NA)
-            #  Is default for refseq for some reason...
             return("BSgenome.Drerio.UCSC.danRer10")
+        },
+        danrer11 = {
+            warning("danRer11 is not supported by BSgenome! Please use Ensembl",
+                " as annotation source if GC content is important.",
+                immediate.=TRUE)
+            return(NA)
+            #return("BSgenome.Drerio.UCSC.danRer11")
         },
         pantro4 = {
             warning("panTro4 is not supported by BSgenome! Please use Ensembl ",
@@ -630,15 +1536,14 @@ loadBsGenome <- function(org) {
         stop("The Bioconductor package BiocManager is required to ",
             "proceed!")
     if (!requireNamespace("BSgenome"))
-        stop("The Bioconductor package BSgenome is required to ",
-            "proceed!")
+        stop("The Bioconductor package BSgenome is required to proceed!")
     bsOrg <- getBsOrganism(org)
     if (!is.na(bsOrg)) {
-        if (bsOrg %in% installed.genomes())
-            bsObj <- getBSgenome(getUcscOrganism(org))
+        if (bsOrg %in% BSgenome::installed.genomes())
+            bsObj <- BSgenome::getBSgenome(getUcscOrganism(org))
         else {
-            BiocManager::install(bsOrg)
-            bsObj <- getBSgenome(getUcscOrganism(org))
+            BiocManager::install(bsOrg,update=FALSE,ask=FALSE)
+            bsObj <- BSgenome::getBSgenome(getUcscOrganism(org))
         }
         return(bsObj)
     }
@@ -649,7 +1554,7 @@ loadBsGenome <- function(org) {
 getChromInfo <- function(org,
     goldenPath="http://hgdownload.cse.ucsc.edu/goldenPath/") {
     download.file(paste(goldenPath,org,"/database/chromInfo.txt.gz",sep=""),
-        file.path(tempdir(),"chromInfo.txt.gz"))
+        file.path(tempdir(),"chromInfo.txt.gz"),quiet=TRUE)
     chromInfo <- read.delim(file.path(tempdir(),"chromInfo.txt.gz"),
         header=FALSE)
     chromInfo <- chromInfo[,1:2]
@@ -689,8 +1594,12 @@ getHost <- function(org,ver=NULL) {
     
     ea <- biomaRt::listEnsemblArchives()
     i <- grep(as.character(ver),ea[,"version"])
-    if (length(i) > 0)
-        return(ea[i,"url"])
+    if (length(i) > 0) {
+        if (ea[i,"current_release"] == "*")
+            return("http://www.ensembl.org")
+        else
+            return(ea[i,"url"])
+    }
     else
         return(NULL)
 }
@@ -709,26 +1618,24 @@ ucscToEnsembl <- function() {
     return(list(
         hg18=67,
         hg19=74:75,
-        hg38=76:92,
+        hg38=76:99,
         mm9=67,
-        mm10=74:92,
+        mm10=74:99,
         rn5=74:79,
-        rn6=80:92,
+        rn6=80:99,
         dm3=c(67,74:78),
-        dm6=79:92,
+        dm6=79:99,
         danrer7=c(67,74:79),
-        danrer10=80:92,
+        danrer10=80:91,
+        danrer11=92:99,
         pantro4=c(67,74:90),
-        pantro5=91:92,
+        pantro5=91:99,
+        #pantro6=,
         susscr3=c(67,74:89),
-        susscr11=90:92,
-        equcab2=c(67,74:92)
+        susscr11=90:99,
+        equcab2=c(67,74:99)
     ))
 }
-
-#getBiotypes <- function(a) {
-#    return(as.character(unique(a$biotype)))
-#}
 
 getHostOld <- function(org) {
     .Deprecated("getHost")
@@ -744,8 +1651,10 @@ getHostOld <- function(org) {
         dm6 = { return("www.ensembl.org") },
         danrer7 = { return("grch37.ensembl.org") },
         danrer10 = { return("www.ensembl.org") },
+        danrer11 = { return("www.ensembl.org") },
         pantro4 = { return("grch37.ensembl.org") },
         pantro5 = { return("www.ensembl.org") },
+        #pantro6 = { return("www.ensembl.org") },
         susscr3 = { return("grch37.ensembl.org") },
         susscr11 = { return("www.ensembl.org") }
     )
@@ -764,8 +1673,10 @@ getAltHost <- function(org) {
         dm6 = { return("uswest.ensembl.org") },
         danrer7 = { return("uswest.ensembl.org") },
         danrer10 = { return("uswest.ensembl.org") },
+        danrer11 = { return("uswest.ensembl.org") },
         pantro4 = { return("uswest.ensembl.org") },
         pantro5 = { return("uswest.ensembl.org") },
+        #pantro6 = { return("uswest.ensembl.org") },
         susscr3 = { return("uswest.ensembl.org") },
         susscr11 = { return("www.ensembl.org") }
     )
@@ -784,8 +1695,10 @@ getDataset <- function(org) {
         dm6 = { return("dmelanogaster_gene_ensembl") },
         danrer7 = { return("drerio_gene_ensembl") },
         danrer10 = { return("drerio_gene_ensembl") },
+        danrer11 = { return("drerio_gene_ensembl") },
         pantro4 = { return("ptroglodytes_gene_ensembl") },
         pantro5 = { return("ptroglodytes_gene_ensembl") },
+        #pantro6 = { return("ptroglodytes_gene_ensembl") },
         susscr3 = { return("sscrofa_gene_ensembl") },
         susscr11 = { return("sscrofa_gene_ensembl") },
         equcab2 = { return("ecaballus_gene_ensembl") },
@@ -872,6 +1785,13 @@ getValidChrs <- function(org) {
                 "chr24","chr25","chr3","chr4","chr5","chr6","chr7","chr8","chr9"
             ))
         },
+        danrer11 = {
+            return(c(
+                "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
+                "chr17","chr18","chr19","chr2","chr20","chr21","chr22","chr23",
+                "chr24","chr25","chr3","chr4","chr5","chr6","chr7","chr8","chr9"
+            ))
+        },
         pantro4 = {
             return(c(
                 "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
@@ -880,6 +1800,13 @@ getValidChrs <- function(org) {
             ))
         },
         pantro5 = {
+            return(c(
+                "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
+                "chr17","chr18","chr19","chr20","chr21","chr22","chr2A","chr2B",
+                "chr3","chr4","chr5","chr6","chr7","chr8","chr9","chrX","chrY"
+            ))
+        },
+        pantro6 = {
             return(c(
                 "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
                 "chr17","chr18","chr19","chr20","chr21","chr22","chr2A","chr2B",
@@ -995,6 +1922,13 @@ getValidChrsWithMit <- function(org) {
                 "chr24","chr25","chr3","chr4","chr5","chr6","chr7","chr8","chr9"
             ))
         },
+        danrer11 = {
+            return(c(
+                "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
+                "chr17","chr18","chr19","chr2","chr20","chr21","chr22","chr23",
+                "chr24","chr25","chr3","chr4","chr5","chr6","chr7","chr8","chr9"
+            ))
+        },
         pantro4 = {
             return(c(
                 "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
@@ -1004,6 +1938,14 @@ getValidChrsWithMit <- function(org) {
             ))
         },
         pantro5 = {
+            return(c(
+                "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
+                "chr17","chr18","chr19","chr20","chr21","chr22","chr2A","chr2B",
+                "chr3","chr4","chr5","chr6","chr7","chr8","chr9","chrX","chrY",
+                "chrM"
+            ))
+        },
+        pantro6 = {
             return(c(
                 "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
                 "chr17","chr18","chr19","chr20","chr21","chr22","chr2A","chr2B",
@@ -1030,7 +1972,8 @@ getValidChrsWithMit <- function(org) {
                 "chr1","chr10","chr11","chr12","chr13","chr14","chr15","chr16",
                 "chr17","chr18","chr19","chr2","chr20","chr21","chr22","chr23",
                 "chr24","chr25","chr26","chr27","chr28","chr29","chr3","chr30",
-                "chr31","chr4","chr5","chr6","chr7","chr8","chr9","chrX",#"chrY",
+                "chr31","chr4","chr5","chr6","chr7","chr8","chr9","chrX",
+                #"chrY",
                 "chrM"
             ))
         },
@@ -1239,11 +2182,23 @@ getBiotypes <- function(org) {
                 "non_coding","sense_overlapping"
             ))
         },
+        danrer11 = {
+            return(c("antisense","protein_coding","miRNA","snoRNA","rRNA",
+                "lincRNA","processed_transcript","snRNA","pseudogene",
+                "sense_intronic","misc_RNA","polymorphic_pseudogene",
+                "IG_V_pseudogene","IG_C_pseudogene","IG_J_pseudogene",
+                "non_coding","sense_overlapping"
+            ))
+        },
         pantro4 = {
             return(c("protein_coding","pseudogene","processed_pseudogene",
                 "miRNA","rRNA","snRNA","snoRNA","misc_RNA"))
         },
         pantro5 = {
+            return(c("protein_coding","pseudogene","processed_pseudogene",
+                "miRNA","rRNA","snRNA","snoRNA","misc_RNA"))
+        },
+        pantro6 = {
             return(c("protein_coding","pseudogene","processed_pseudogene",
                 "miRNA","rRNA","snRNA","snoRNA","misc_RNA"))
         },
@@ -1270,2113 +2225,562 @@ getSupportedRefDbs <- function() {
 
 getSupportedOrganisms <- function() {
     return(c("hg18","hg19","hg38","mm9","mm10","rn5","rn6","dm3","dm6",
-        "danrer7","danrer10","pantro4","pantro5","susscr3","susscr11",
-        "equcab2","tair10"))
+        "danrer7","danrer10","danrer11","pantro4","pantro5","susscr3",
+        #"pantro6",
+        "susscr11","equcab2","tair10"))
 }
 
 getSupportedUcscDbs <- function() {
     return(c("ucsc","refseq"))
 }
 
-getUcscDbl <- function(org,type,refdb="ucsc") {
-    type <- tolower(type[1])
-    org <- tolower(org[1])
-    refdb <- tolower(refdb[1])
-    checkTextArgs("type",type,c("gene","exon"))
-    checkTextArgs("org",org,getSupportedOrganisms(),multiarg=FALSE)
-    checkTextArgs("refdb",refdb,getSupportedUcscDbs())
-    
-    if (!requireNamespace("RSQLite"))
-        stop("R package RSQLite is required to use annotation from UCSC!")
-
-    httpBase <- paste("http://hgdownload.soe.ucsc.edu/goldenPath/",
-        getUcscOrganism(org),"/database/",sep="")
-    tableDefs <- getUcscTabledef(org,type,refdb,"fields")
-    fileList <- vector("list",length(tableDefs))
-    names(fileList) <- names(tableDefs)
-    for (n in names(fileList))
-        fileList[[n]] <- paste(httpBase,n,".txt.gz",sep="")
+importCustomGtf <- function(gtfFile,type=c("gene","exon","utr")) {
+    if (!requireNamespace("GenomicFeatures"))
+        stop("Bioconductor package GenomicFeatures is required to build ",
+            "custom annotation!")
         
-    # Fill the fields for each table
-    drv <- dbDriver("SQLite")
-    dbTmp <- tempfile()
-    con <- dbConnect(drv,dbname=dbTmp)
-    message("  Retrieving tables for temporary SQLite ",refdb," ",org," ",type,
-        " subset database")
-    for (n in names(fileList)) {
-        message("    Retrieving table ",n)
-        download.file(fileList[[n]],file.path(tempdir(),
-            paste(n,".txt.gz",sep="")),quiet=TRUE)
-        if (.Platform$OS.type == "unix")
-            system(paste("gzip -df",file.path(tempdir(),
-                paste(n,".txt.gz",sep=""))))
+    # Some argument checking
+    type <- type[1]
+    checkTextArgs("type",type,c("gene","exon","utr"),multiarg=FALSE)
+    
+    # Import the GTF with rtracklayer to create a map of available metadata
+    message("  Importing GTF ",gtfFile," as GTF to make id map")
+    desiredColumns <- c("type","gene_id","transcript_id","exon_id",
+        "gene_name","gene_biotype")
+    gr <- import(gtfFile,format="gtf",colnames=desiredColumns,
+        feature.type=GenomicFeatures:::GFF_FEATURE_TYPES)
+    grdf <- as.data.frame(gr)
+    grdf <- grdf[grdf$type=="exon",]
+
+    # Need to map gene ids to names and biotypes. We need a collapsed 
+    # structure exon_id - transcript_id - gene_id - gane_name - biotype
+    message("  Making id map")
+    map <- .makeIdMap(grdf)
+    
+    message("  Importing GTF ",gtfFile," as TxDb")
+    txdb <- suppressWarnings(makeTxDbFromGFF(gtfFile))
+    
+    switch(type,
+        gene = {
+            return(.makeGeneGeneFromTxDb(txdb,map))
+        },
+        exon = {
+            return(.makeGeneExonFromTxDb(txdb,map))
+        },
+        utr = {
+            return(.makeGeneUtrFromTxDb(txdb,map))
+        }
+    )
+}
+
+parseCustomGtf <- function(gtfFile) {
+    if (!requireNamespace("GenomicFeatures"))
+        stop("Bioconductor package GenomicFeatures is required to parse ",
+            "custom GTF file!")
+    
+    # Import the GTF with rtracklayer to create a map of available metadata
+    message("  Importing GTF ",gtfFile," as GTF to make id map")
+    desiredColumns <- c("type","gene_id","transcript_id","exon_id",
+        "gene_name","gene_biotype")
+    gr <- import(gtfFile,format="gtf",colnames=desiredColumns,
+        feature.type=GenomicFeatures:::GFF_FEATURE_TYPES)
+    grdf <- as.data.frame(gr)
+    grdf <- grdf[grdf$type=="exon",]
+
+    # Need to map gene ids to names and biotypes. We need a collapsed 
+    # structure exon_id - transcript_id - gene_id - gane_name - biotype
+    message("  Making id map")
+    map <- .makeIdMap(grdf)
+    
+    message("  Importing GTF ",gtfFile," as TxDb")
+    txdb <- suppressWarnings(makeTxDbFromGFF(gtfFile))
+    
+    return(list(txdb=txdb,map=map))
+}
+
+annotationFromCustomGtf <- function(parsed,type=c("gene","exon","utr"),
+    summarized=FALSE,asdf=FALSE) {
+    # Some argument checking
+    if (!is.logical(summarized))
+        stop("summarized must be TRUE or FALSE")
+    type <- type[1]
+    checkTextArgs("type",type,c("gene","exon","utr"),multiarg=FALSE)
+    
+    txdb <- parsed$txdb
+    map <- parsed$map
+    
+    switch(type,
+        gene = {
+            return(.makeGeneGeneFromTxDb(txdb,map,asdf))
+        },
+        exon = {
+            if (summarized)
+                return(.makeSumGeneExonFromTxDb(txdb,map,asdf))
+            else
+                return(.makeGeneExonFromTxDb(txdb,map,asdf))
+        },
+        utr = {
+            if (summarized)
+                return(.makeSumGeneUtrFromTxDb(txdb,map,asdf))
+            else
+                return(.makeGeneUtrFromTxDb(txdb,map,asdf))
+        }
+    )
+}
+
+.makeGeneGeneFromTxDb <- function(txdb,map,asdf) {
+    gr <- genes(txdb)
+                    
+    # We need to add gc_content, gene_name, biotype from the map
+    # Remove the exon_id and transcript_id columns from the map
+    # for the gene case
+    ir <- c(which(names(map)=="exon_id"),
+        which(names(map)=="transcript_id"))
+    if (length(ir) > 0)
+        smap <- map[,-ir,drop=FALSE]
+    dgt <- which(duplicated(smap))
+    if (length(dgt) > 0)
+        smap <- smap[-dgt,]
+    
+    # Add metadata from the map
+    rownames(smap) <- smap$gene_id
+    smap <- smap[names(gr),,drop=FALSE]
+    gr$gene_name <- smap$gene_name
+    gr$biotype <- smap$biotype
+    gr$gc_content = rep(50,length(gr))
+    ann <- as.data.frame(gr)
+    ann <- ann[,c(1:3,6,9,5,7,8)]
+    names(ann)[1] <- "chromosome"
+    ann$chromosome <- as.character(ann$chromosome)
+    ann <- ann[order(ann$chromosome,ann$start),]
+    
+    if (asdf)
+        return(ann)
+    else
+        return(GRanges(ann))
+}
+
+.makeGeneExonFromTxDb <- function(txdb,map,asdf) {
+    gr <- exons(txdb,columns="exon_name")
+    names(gr) <- gr$exon_name
+    
+    # We need to add gene_id, gene_name, biotype from the map
+    # Remove the transcript_id column from the map for the gene
+    # case
+    ir <- which(names(map)=="transcript_id")
+    if (length(ir) > 0)
+        smap <- map[,-ir,drop=FALSE]
+    dgt <- which(duplicated(smap))
+    if (length(dgt) > 0)
+        smap <- smap[-dgt,]
+    
+    # Add metadata from the map
+    rownames(smap) <- smap$exon_id
+    smap <- smap[names(gr),,drop=FALSE]
+    gr$gene_id <- smap$gene_id
+    gr$gene_name <- smap$gene_name
+    gr$biotype <- smap$biotype
+    ann <- as.data.frame(unname(gr))
+    ann <- ann[,c(1:3,6,8,5,7,9)]
+    names(ann)[c(1,4)] <- c("chromosome","exon_id")
+    ann$chromosome <- as.character(ann$chromosome)
+    ann <- ann[order(ann$chromosome,ann$start),]
+    
+    if (asdf)
+        return(ann)
+    else
+        return(GRanges(ann))
+}
+
+.makeSumGeneExonFromTxDb <- function(txdb,map,asdf) {
+    gr <- exons(txdb,columns="exon_name")
+    names(gr) <- gr$exon_name
+    
+    # We need to add gene_id, gene_name, biotype from the map
+    # Remove the transcript_id column from the map for the gene
+    # case
+    ir <- which(names(map)=="transcript_id")
+    if (length(ir) > 0)
+        smap <- map[,-ir,drop=FALSE]
+    dgt <- which(duplicated(smap))
+    if (length(dgt) > 0)
+        smap <- smap[-dgt,]
+    
+    # Add metadata from the map
+    rownames(smap) <- smap$exon_id
+    smap <- smap[names(gr),,drop=FALSE]
+    gr$gene_id <- smap$gene_id
+    gr$gene_name <- smap$gene_name
+    gr$biotype <- smap$biotype
+    ann <- as.data.frame(unname(gr))
+    ann <- ann[,c(1:3,6,8,5,7,9)]
+    names(ann)[c(1,4)] <- c("chromosome","exon_id")
+    ann$chromosome <- as.character(ann$chromosome)
+    ann <- ann[order(ann$chromosome,ann$start),]
+    
+    message("  summarizing exons per gene for imported GTF")
+    annList <- reduceExons(GRanges(ann))
+    sexon <- annList$model
+    names(sexon) <- as.character(sexon$exon_id)
+    activeLength <- annList$length
+    names(activeLength) <- unique(sexon$gene_id)
+    attr(sexon,"activeLength") <- activeLength
+    
+    if (asdf) {
+        eann <- as.data.frame(sexon)
+        eann <- eann[,c(1:3,6,8,5,7,9)]
+        names(eann)[c(1,4)] <- c("chromosome","exon_id")
+        attr(eann,"activeLength") <- activeLength
+        return(eann)
+    }
+    else
+        return(sexon)
+}
+
+.makeGeneUtrFromTxDb <- function(txdb,map,asdf) {
+    utrList <- threeUTRsByTranscript(txdb,use.names=TRUE)
+    utrGr <- unlist(utrList)
+    
+    # There may be no sufficient information to create UTRs
+    if (length(utrGr) == 0) {
+        warning("No UTR information was found in the provided GTF file! Will ",
+            "return an empty object...",immediate.=TRUE)
+        ann <- data.frame(chromosome=1,start=1,end=1,
+            transcript_id=1,gene_id=1,strand=1,gene_name=1,
+            biotype=1,row.names=1)
+        # Strange but required to be compatible with GRanges
+        ann <- ann[-1,]
+        if (asdf)
+            return(ann)
         else
-            unzip(file.path(tempdir(),paste(n,".txt.gz",sep="")))
-        sqlDf <- read.delim(file.path(tempdir(),paste(n,".txt",sep="")),
-            row.names=NULL,header=FALSE,strip.white=TRUE)
-        names(sqlDf) <- tableDefs[[n]]
-        dbWriteTable(con,n,sqlDf,row.names=FALSE)
+            return(GRanges(ann))
     }
-    dbDisconnect(con)
-    return(dbTmp)
+    
+    utrGr$transcript_id <- names(utrGr)
+    utrTmp <- as.data.frame(unname(utrGr))
+    keep <- c("seqnames","start","end","transcript_id",
+        "exon_rank","strand","exon_name")
+    utr <- utrTmp[,keep]
+    
+    rownames(utr) <- paste(utr$exon_name,utr$transcript_id,sep="_")
+    rownames(map) <- paste(map$exon_id,map$transcript_id,sep="_")
+    
+    # Different case with map here
+    smap <- map[rownames(utr),]
+    
+    # We need to add gene_id, gene_name, biotype from the map
+    # Remove the exon_id column from the map for the gene case
+    ir <- which(names(smap)=="exon_id")
+    if (length(ir) > 0)
+        smap <- smap[,-ir,drop=FALSE]
+    
+    # Add metadata from the map
+    utr$gene_id <- smap$gene_id
+    utr$gene_name <- smap$gene_name
+    utr$biotype <- smap$biotype
+    ann <- utr[,c(1:4,8,6,9,10)]
+    names(ann)[1] <- "chromosome"
+    ann$chromosome <- as.character(ann$chromosome)
+    ann <- ann[order(ann$chromosome,ann$start),]
+    
+    if (asdf)
+        return(ann)
+    else
+        return(GRanges(ann))
 }
 
-getUcscTabledef <- function(org,type,refdb="ucsc",what="queries") {
-    type <- tolower(type[1])
-    org <- tolower(org[1])
-    refdb <- tolower(refdb[1])
-    what <- tolower(what[1])
-    checkTextArgs("type",type,c("gene","exon"))
-    checkTextArgs("org",org,getSupportedOrganisms(),multiarg=FALSE)
-    checkTextArgs("refdb",refdb,getSupportedUcscDbs())
-    checkTextArgs("what",what,c("queries","fields"))
-    switch(type,
-        gene = {
-            switch(refdb,
-                ucsc = {
-                    switch(org,
-                        hg18 = {
-                            return(list(
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownGene=getUcscTblTpl("knownGene",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                refFlat=getUcscTblTpl("refFlat",what)
-                            ))
-                        },
-                        hg19 = {
-                            return(list(
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownGene=getUcscTblTpl("knownGene",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownToEnsembl=
-                                    getUcscTblTpl("knownToEnsembl",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what),
-                                refFlat=getUcscTblTpl("refFlat",what)
-                            ))
-                        },
-                        hg38 = {
-                            return(list(
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownGene=getUcscTblTpl("knownGene",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                refFlat=getUcscTblTpl("refFlat",what)
-                            ))
-                        },
-                        mm9 = {
-                            return(list(
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownGene=getUcscTblTpl("knownGene",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownToEnsembl=
-                                    getUcscTblTpl("knownToEnsembl",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what),
-                                refFlat=getUcscTblTpl("refFlat",what)
-                            ))
-                        },
-                        mm10 = {
-                            return(list(
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownGene=getUcscTblTpl("knownGene",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownToEnsembl=
-                                    getUcscTblTpl("knownToEnsembl",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what),
-                                refFlat=getUcscTblTpl("refFlat",what)
-                            ))
-                        },
-                        rn5 = {
-                            return(list(
-                                mgcGenes=getUcscTblTpl("mgcGenes",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        rn6 = {
-                            return(list(
-                                mgcGenes=getUcscTblTpl("mgcGenes",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        dm3 = {
-                            return(list(
-                                flyBaseCanonical=
-                                    getUcscTblTpl("flyBaseCanonical",what),
-                                flyBaseGene=
-                                    getUcscTblTpl("flyBaseGene",what),
-                                flyBaseToRefSeq=
-                                    getUcscTblTpl("flyBaseToRefSeq",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        dm6 = {
-                            warning("No UCSC Genome annotation for Drosophila ",
-                                "melanogaster v6! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        danrer7 = {
-                            return(list(
-                                mgcGenes=getUcscTblTpl("mgcGenes",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        danrer10 = {
-                            return(list(
-                                mgcGenes=getUcscTblTpl("mgcGenes",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        pantro4 = {
-                            warning("No UCSC Genome annotation for Pan ",
-                                "troglodytes! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        pantro5 = {
-                            warning("No UCSC Genome annotation for Pan ",
-                                "troglodytes! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        susscr3 = {
-                            warning("No UCSC Genome annotation for Sus ",
-                                "scrofa v3! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        susscr11 = {
-                            warning("No UCSC Genome annotation for Sus ",
-                                "scrofa v11! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        equcab2 = {
-                            warning("No UCSC Genome annotation for Equus ",
-                                "caballus v2! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        }
-                    )
-                },
-                refseq = {
-                    switch(org,
-                        hg18 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what)
-                            ))
-                        },
-                        hg19 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownToEnsembl=
-                                    getUcscTblTpl("knownToEnsembl",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        hg38 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what)
-                            ))
-                        },
-                        mm9 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownToEnsembl=
-                                    getUcscTblTpl("knownToEnsembl",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        mm10 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownToEnsembl=
-                                    getUcscTblTpl("knownToEnsembl",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        rn5 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        rn6 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        dm3 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        dm6 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        danrer7 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        danrer10 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        pantro4 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        pantro5 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        susscr3 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        susscr11 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        equcab2 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        }
-                    )
-                }
-            )
-        },
-        exon = {
-            switch(refdb,
-                ucsc = {
-                    switch(org,
-                        hg18 = {
-                            return(list(
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownGene=getUcscTblTpl("knownGene",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                refFlat=getUcscTblTpl("refFlat",what)
-                            ))
-                        },
-                        hg19 = {
-                            return(list(
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownGene=getUcscTblTpl("knownGene",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownToEnsembl=
-                                    getUcscTblTpl("knownToEnsembl",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what),
-                                refFlat=getUcscTblTpl("refFlat",what)
-                            ))
-                        },
-                        hg38 = {
-                            return(list(
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownGene=getUcscTblTpl("knownGene",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                refFlat=getUcscTblTpl("refFlat",what)
-                            ))
-                        },
-                        mm9 = {
-                            return(list(
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownGene=getUcscTblTpl("knownGene",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownToEnsembl=
-                                    getUcscTblTpl("knownToEnsembl",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what),
-                                refFlat=getUcscTblTpl("refFlat",what)
-                            ))
-                        },
-                        mm10 = {
-                            return(list(
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownGene=getUcscTblTpl("knownGene",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownToEnsembl=
-                                    getUcscTblTpl("knownToEnsembl",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what),
-                                refFlat=getUcscTblTpl("refFlat",what)
-                            ))
-                        },
-                        rn5 = {
-                            return(list(
-                                mgcGenes=getUcscTblTpl("mgcGenes",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        rn6 = {
-                            return(list(
-                                mgcGenes=getUcscTblTpl("mgcGenes",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        dm3 = {
-                            return(list(
-                                flyBaseCanonical=
-                                    getUcscTblTpl("flyBaseCanonical",what),
-                                flyBaseGene=
-                                    getUcscTblTpl("flyBaseGene",what),
-                                flyBaseToRefSeq=
-                                    getUcscTblTpl("flyBaseToRefSeq",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        dm6 = {
-                            warning("No UCSC Genome annotation for Drosophila ",
-                                "melanogaster v6! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        danrer7 = {
-                            return(list(
-                                mgcGenes=getUcscTblTpl("mgcGenes",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        danrer10 = {
-                            return(list(
-                                mgcGenes=getUcscTblTpl("mgcGenes",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        pantro4 = {
-                            warning("No UCSC Genome annotation for Pan ",
-                                "troglodytes! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        susscr3 = {
-                            warning("No UCSC Genome annotation for Sus ",
-                                "scrofa v3! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        susscr11 = {
-                            warning("No UCSC Genome annotation for Sus ",
-                                "scrofa v11! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        equcab2 = {
-                            warning("No UCSC Genome annotation for Equus ",
-                                "caballus v2! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        }
-                    )
-                },
-                refseq = {
-                    switch(org,
-                        hg18 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what)
-                            ))
-                        },
-                        hg19 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownToEnsembl=
-                                    getUcscTblTpl("knownToEnsembl",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        hg38 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what)
-                            ))
-                        },
-                        mm9 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownToEnsembl=
-                                    getUcscTblTpl("knownToEnsembl",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        mm10 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                knownToRefSeq=
-                                    getUcscTblTpl("knownToRefSeq",what),
-                                knownCanonical=
-                                    getUcscTblTpl("knownCanonical",what),
-                                knownToEnsembl=
-                                    getUcscTblTpl("knownToEnsembl",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        rn5 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        rn6 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        dm3 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        dm6 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        danrer7 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        danrer10 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        pantro4 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        pantro10 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        susscr3 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        susscr11 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        },
-                        equcab2 = {
-                            return(list(
-                                refFlat=getUcscTblTpl("refFlat",what),
-                                ensemblToGeneName=
-                                    getUcscTblTpl("ensemblToGeneName",what),
-                                ensemblSource=
-                                    getUcscTblTpl("ensemblSource",what)
-                            ))
-                        }
-                    )
-                }
-            )
+.makeSumGeneUtrFromTxDb <- function(txdb,map,asdf) {
+    utrList <- threeUTRsByTranscript(txdb,use.names=TRUE)
+    utrGr <- unlist(utrList)
+    
+    if (length(utrGr) == 0) {
+        warning("No UTR information was found in the provided GTF file! Will ",
+            "return an empty object...",immediate.=TRUE)
+        ann <- data.frame(chromosome=1,start=1,end=1,
+            transcript_id=1,gene_id=1,strand=1,gene_name=1,
+            biotype=1,row.names=1)
+        # Strange but required to be compatible with GRanges
+        ann <- ann[-1,]
+        if (asdf)
+            return(ann)
+        else
+            return(GRanges(ann))
+    }
+    
+    utrGr$transcript_id <- names(utrGr)
+    utrTmp <- as.data.frame(unname(utrGr))
+    keep <- c("seqnames","start","end","transcript_id",
+        "exon_rank","strand","exon_name")
+    utr <- utrTmp[,keep]
+    
+    rownames(utr) <- paste(utr$exon_name,utr$transcript_id,sep="_")
+    rownames(map) <- paste(map$exon_id,map$transcript_id,sep="_")
+    
+    # Different case with map here
+    smap <- map[rownames(utr),]
+    
+    # We need to add gene_id, gene_name, biotype from the map
+    # Remove the exon_id column from the map for the gene case
+    ir <- which(names(smap)=="exon_id")
+    if (length(ir) > 0)
+        smap <- smap[,-ir,drop=FALSE]
+    
+    # Add metadata from the map
+    utr$gene_id <- smap$gene_id
+    utr$gene_name <- smap$gene_name
+    utr$biotype <- smap$biotype
+    ann <- utr[,c(1:4,8,6,9,10)]
+    names(ann)[1] <- "chromosome"
+    ann$chromosome <- as.character(ann$chromosome)
+    ann <- ann[order(ann$chromosome,ann$start),]
+    
+    message("  summarizing UTRs per gene for imported GTF")
+    #s3utr <- reduceTranscripts(GRanges(ann))
+    annList <- reduceTranscripts(GRanges(ann))
+    s3utr <- annList$model
+    names(s3utr) <- as.character(s3utr$transcript_id)
+    activeLength <- annList$length
+    names(activeLength) <- unique(as.character(s3utr$gene_id))
+    
+    if (asdf) {
+        sann <- as.data.frame(s3utr)
+        sann <- sann[,c(1:3,6,8,5,7,9)]
+        names(sann)[c(1,4)] <- c("chromosome","gene_id")
+        attr(sann,"activeLength") <- activeLength
+        return(sann)
+    }
+    else
+        return(s3utr)
+}
+
+.makeIdMap <- function(grdf) {
+    #hasGeneName <- hasBiotype <- FALSE
+    if (!all(is.na(grdf$gene_name)) && !all(is.na(grdf$gene_biotype))) {
+        map <- grdf[,c("exon_id","transcript_id","gene_id","gene_name",
+            "gene_biotype")]
+        names(map)[5] <- "biotype"
+        #hasGeneName <- hasBiotype <- TRUE
+    }
+    else if (all(is.na(grdf$gene_name)) && !all(is.na(grdf$gene_biotype))) {
+        map <- grdf[,c("exon_id","transcript_id","gene_id","gene_id",
+            "gene_biotype")]
+        names(map)[4:5] <- c("gene_name","biotype")
+        #hasBiotype <- TRUE
+    }
+    else if (!all(is.na(grdf$gene_name)) && all(is.na(grdf$gene_biotype))) {
+        map <- grdf[,c("exon_id","transcript_id","gene_id","gene_name")]
+        map$gene_biotype <- rep("gene",nrow(map))
+        names(map)[5] <- "biotype"
+        #hasGeneName <- TRUE
+    }
+    else {
+        map <- grdf[,c("exon_id","transcript_id","gene_id","gene_id")]
+        map$gene_biotype <- rep("gene",nrow(map))
+        names(map)[4:5] <- c("gene_name","biotype")
+    }
+    nag <- which(is.na(map$gene_name))
+    if (length(nag) > 0)
+        map$gene_name[nag] <- map$gene_id[nag]
+    nab <- which(is.na(map$biotype))
+    if (length(nab) > 0)
+        map$biotype[nag] <- "gene"
+    return(map)
+}
+
+initDatabase <- function(db) {
+    if (!requireNamespace("RSQLite"))
+        stop("R package RSQLite is required to build the annotation database!")
+    if (missing(db))
+        stop("A database file must be provided!")
+    drv <- dbDriver("SQLite")
+    if (file.exists(db))
+        # The database has been created at least with the tables defined
+        con <- dbConnect(drv,dbname=db)
+    else {
+        # Create database file and define tables
+        con <- dbConnect(drv,dbname=db)
+        rs <- .initTables(con)
+    }
+    return(con)
+}
+
+.initTables <- function(con) {
+    queries <- .localTblDef()
+    rs <- dbSendQuery(con,queries[[1]])
+    if (dbHasCompleted(rs))
+        dbClearResult(rs)
+    for (n in names(queries)) {
+        rs <- dbSendStatement(con,queries[[n]])
+        if (dbHasCompleted(rs))
+            dbClearResult(rs)
+    }
+}
+
+.chromInfoToSeqInfoDf <- function(ci,o="custom",circ=FALSE,asSeqinfo=FALSE) {
+    if (asSeqinfo)
+        return(Seqinfo(seqnames=rownames(ci),seqlengths=ci[,1],
+            isCircular=rep(circ,nrow(ci)),genome=o))
+    else
+        return(data.frame(chromosome=rownames(ci),length=as.integer(ci[,1])))
+}
+
+.myGetBM <- function(attributes,filters="",values="",mart,curl=NULL,
+    checkFilters=TRUE,verbose=FALSE,uniqueRows=TRUE,bmHeader=FALSE,quote="\"") {
+    biomaRt:::martCheck(mart)
+    if(missing(attributes))
+        stop("Argument 'attributes' must be specified.")
+    
+    if (is.list(filters) && !missing(values))
+        warning("Argument 'values' should not be used when argument 'filters'",
+            "is a list and will be ignored.")
+    if (is.list(filters) && is.null(names(filters)))
+        stop("Argument 'filters' must be a named list when sent as a list.")
+    if (!is.list(filters) && all(filters != "") && missing(values))
+        stop("Argument 'values' must be specified.")
+    if (length(filters) > 0 && length(values) == 0)
+        stop("Values argument contains no data.")
+    
+    if (is.list(filters)) {
+        values <- filters
+        filters <- names(filters)
+    }
+    
+    if (!is(uniqueRows,"logical"))
+        stop("Argument 'uniqueRows' must be a logical value, so either TRUE ",
+            "or FALSE")
+    
+    # force the query to return the 'english text' header names with the result
+    # we use these later to match and order attribute/column names    
+    callHeader <- TRUE
+    xmlQuery <- paste0("<?xml version='1.0' encoding='UTF-8'?><!DOCTYPE Query>",
+        "<Query  virtualSchemaName = '",biomaRt:::martVSchema(mart),
+        "' uniqueRows = '",as.numeric(uniqueRows),
+        "' count = '0' datasetConfigVersion = '0.6' header='",
+        as.numeric(callHeader),"' requestid= 'biomaRt'> <Dataset name = '",
+        biomaRt:::martDataset(mart),"'>")
+    
+    # checking the Attributes
+    invalid <- !(attributes %in% listAttributes(mart, what="name"))
+    if(any(invalid))
+        stop(paste("Invalid attribute(s):", paste(attributes[invalid],
+            collapse=", "),"\nPlease use the function 'listAttributes' to get ",
+            "valid attribute names"))
+    
+    # attribute are ok lets add them to the query
+    attributeXML = paste("<Attribute name = '",attributes, "'/>",collapse="",
+        sep="")
+    
+    #checking the filters
+    if(filters[1] != "" && checkFilters) {
+        invalid <- !(filters %in% listFilters(mart, what="name"))
+        if(any(invalid))
+            stop(paste("Invalid filters(s):", paste(filters[invalid],
+                collapse=", "),"\nPlease use the function 'listFilters' to ",
+                "get valid filter names"))
+    }
+    
+    # filterXML is a list containing filters with reduced numbers of values
+    # to meet the 500 value limit in BioMart queries
+    filterXmlList <- biomaRt:::.generateFilterXML(filters,values,mart)
+    
+    resultList <- list()
+    
+    # we submit a query for each chunk of the filter list
+    for (i in seq_along(filterXmlList)) {
+        filterXML <- filterXmlList[[i]]
+        fullXmlQuery <- paste(xmlQuery,attributeXML,filterXML,
+            "</Dataset></Query>",sep="")
+        
+        if(verbose)
+            message(fullXmlQuery)
+        
+        # we choose a separator based on whether '?redirect=no' is present
+        sep <- ifelse(grepl(x=biomaRt:::martHost(mart),
+            pattern=".+\\?.+"), "&", "?")
+        
+        postRes <- .mySubmitQueryXML(host=paste0(biomaRt:::martHost(mart),sep),
+            query=fullXmlQuery)
+        
+        if (verbose) {
+            writeLines("#################\nResults from server:")
+            print(postRes)
         }
-    )
-}
-
-getUcscTblTpl <- function(tab,what="queries") {
-    if (what=="queries") {
-        switch(tab,
-            knownCanonical = {
-                return(paste(
-                    "CREATE TABLE",
-                    "`knownCanonical` (",
-                    "`chrom` TEXT NOT NULL DEFAULT '',",
-                    "`chromStart` INTEGER NOT NULL DEFAULT '0',",
-                    "`chromEnd` INTEGER NOT NULL DEFAULT '0',",
-                    "`clusterId` INTEGER NOT NULL DEFAULT '0',",
-                    "`transcript` TEXT NOT NULL DEFAULT '',",
-                    "`protein` TEXT NOT NULL DEFAULT ''",
-                    ")",collapse=" "
-                ))
-            },
-            knownGene = {
-                return(paste(
-                    "CREATE TABLE",
-                    "`knownGene` (",
-                    "`name` TEXT NOT NULL DEFAULT '',",
-                    "`chrom` TEXT NOT NULL DEFAULT '',",
-                    "`strand` TEXT NOT NULL DEFAULT '',",
-                    "`txStart` UNSIGNED INTEGER NOT NULL DEFAULT '0',",
-                    "`txEnd` UNSIGNED INTEGER NOT NULL DEFAULT '0',",
-                    "`cdsStart` UNSIGNED INTEGER NOT NULL DEFAULT '0',",
-                    "`cdsEnd` UNSIGNED INTEGER NOT NULL DEFAULT '0',",
-                    "`exonCount` UNSIGNED INTEGER NOT NULL DEFAULT '0',",
-                    "`exonStarts` TEXT NOT NULL,",
-                    "`exonEnds` TEXT NOT NULL,",
-                    "`proteinID` TEXT NOT NULL DEFAULT '',",
-                    "`alignID` TEXT NOT NULL DEFAULT ''",
-                    ")",collapse=" "
-                ))
-            },
-            knownToRefSeq = {
-                return(paste(
-                    "CREATE TABLE",
-                    "`knownToRefSeq` (",
-                    "`name` TEXT NOT NULL DEFAULT '',",
-                    "`value` TEXT NOT NULL DEFAULT ''",
-                    ")",collapse=" "
-                ))
-            },
-            refFlat = {
-                return(paste("CREATE TABLE",
-                    "`refFlat` (",
-                    "`geneName` TEXT NOT NULL,",
-                    "`name` TEXT NOT NULL,",
-                    "`chrom` TEXT NOT NULL,",
-                    "`strand` TEXT NOT NULL,",
-                    "`txStart` UNSIGNED INTEGER NOT NULL,",
-                    "`txEnd` UNSIGNED INTEGER NOT NULL,",
-                    "`cdsStart` UNSIGNED INTEGER NOT NULL,",
-                    "`cdsEnd` UNSIGNED INTEGER NOT NULL,",
-                    "`exonCount` UNSIGNED INTEGER NOT NULL,",
-                    "`exonStarts` TEXT NOT NULL,",
-                    "`exonEnds` TEXT NOT NULL",
-                    ")",collapse=" "
-                ))
-            },
-            knownToEnsembl = {
-                return(paste(
-                    "CREATE TABLE",
-                    "`knownToEnsembl` (",
-                    "`name` TEXT NOT NULL DEFAULT '',",
-                    "`value` TEXT NOT NULL DEFAULT ''",
-                    ")",collapse=" "
-                ))
-            },
-            ensemblSource = {
-                return(paste(
-                    "CREATE TABLE",
-                    "`ensemblSource` (",
-                    "`name` TEXT NOT NULL DEFAULT '',",
-                    "`source` TEXT NOT NULL DEFAULT ''",
-                    ")",collapse=" "
-                ))
-            },
-            mgcGenes = {
-                return(paste(
-                    "CREATE TABLE `mgcGenes` (",
-                    "`bin` UNSIGNED INTEGER NOT NULL,",
-                    "`name` TEXT NOT NULL,",
-                    "`chrom` TEXT NOT NULL,",
-                    "`strand` TEXT NOT NULL,",
-                    "`txStart` UNSIGNED INTEGER NOT NULL,",
-                    "`txEnd` UNSIGNED INTEGER NOT NULL,",
-                    "`cdsStart` UNSIGNED INTEGER NOT NULL,",
-                    "`cdsEnd` UNSIGNED INTEGER NOT NULL,",
-                    "`exonCount` UNSIGNED INTEGER NOT NULL,",
-                    "`exonStarts` TEXT NOT NULL,",
-                    "`exonEnds` TEXT NOT NULL,",
-                    "`score` INTEGER DEFAULT NULL,",
-                    "`name2` TEXT NOT NULL,",
-                    "`cdsStartStat` TEXT NOT NULL,",
-                    "`cdsEndStat` TEXT NOT NULL,",
-                    "`exonFrames` TEXT NOT NULL",
-                    ")",collapse=" "
-                ))
-            },
-            ensemblToGeneName = {
-                return(paste(
-                    "CREATE TABLE",
-                    "`knownToGeneName` (",
-                    "`name` TEXT NOT NULL,",
-                    "`value` TEXT NOT NULL",
-                    ")",collapse=" "
-                ))
-            },
-            flyBaseCanonical = {
-                return(paste(
-                    "CREATE TABLE",
-                    "`flyBaseCanonical` (",
-                    "`chrom` TEXT NOT NULL DEFAULT '',",
-                    "`chromStart` INTEGER NOT NULL DEFAULT '0',",
-                    "`chromEnd` INTEGER NOT NULL DEFAULT '0',",
-                    "`clusterId` INTEGER unsigned NOT NULL DEFAULT '0',",
-                    "`transcript` TEXT NOT NULL DEFAULT '',",
-                    "`protein` TEXT NOT NULL DEFAULT ''",
-                    ")",collapse=" "
-                ))
-            },
-            flyBaseGene = {
-                return(paste(
-                    "CREATE TABLE",
-                    "`flyBaseGene` (",
-                    "`bin` UNSIGNED INTEGER NOT NULL DEFAULT '0',",
-                    "`name` TEXT NOT NULL DEFAULT '',",
-                    "`chrom` TEXT NOT NULL DEFAULT '',",
-                    "`strand` TEXT NOT NULL DEFAULT '',",
-                    "`txStart` UNSIGNED INTEGER NOT NULL DEFAULT '0',",
-                    "`txEnd` UNSIGNED INTEGER NOT NULL DEFAULT '0',",
-                    "`cdsStart` UNSIGNED INTEGER NOT NULL DEFAULT '0',",
-                    "`cdsEnd` UNSIGNED INTEGER NOT NULL DEFAULT '0',",
-                    "`exonCount` UNSIGNED INTEGER NOT NULL DEFAULT '0',",
-                    "`exonStarts` TEXT NOT NULL,",
-                    "`exonEnds` TEXT NOT NULL",
-                    ")",collapse=" "
-                ))
-            },
-            flyBaseToRefSeq = {
-                return(paste(
-                    "CREATE TABLE",
-                    "`flyBaseToRefSeq` (",
-                    "`name` TEXT NOT NULL DEFAULT '',",
-                    "`value` TEXT NOT NULL DEFAULT ''",
-                    ")",collapse=" "
-                ))
+        
+        if (!(is.character(postRes) && (length(postRes)==1L)))
+            stop("The query to the BioMart webservice returned an invalid ",
+                "result: biomaRt expected a character string of length 1.\n",
+                "Please report this on the support site at", 
+                "http://support.bioconductor.org")
+        
+        if (gsub("\n","",postRes,fixed=TRUE,useBytes=TRUE)== "") { 
+            # meaning an empty result
+            result <- as.data.frame(matrix("",ncol=length(attributes),nrow=0),
+                stringsAsFactors=FALSE)
+        } else {
+            if (length(grep("^Query ERROR",postRes)) > 0L)
+                stop(postRes)
+            
+            # convert the serialized table into a dataframe
+            con <- textConnection(postRes)
+            result <- read.table(con,sep="\t",header=callHeader,quote=quote,
+                comment.char="",check.names=FALSE,stringsAsFactors=FALSE)
+            if(verbose) {
+                writeLines("#################\nParsed results:")
+                print(result)
             }
-        )
-    }
-    else if (what=="fields") {
-        switch(tab,
-            knownCanonical = {
-                return(c("chrom","chromStart","chromEnd","clusterId",
-                "transcript","protein"))
-            },
-            knownGene = {
-                return(c("name","chrom","strand","txStart","txEnd","cdsStart",
-                    "cdsEnd","exonCount","exonStarts","exonEnds","proteinID",
-                    "alignID"))
-            },
-            knownToRefSeq = {
-                return(c("name","value"))
-            },
-            refFlat = {
-                return(c("geneName","name","chrom","strand","txStart","txEnd",
-                    "cdsStart","cdsEnd","exonCount","exonStarts","exonEnds"))
-            },
-            knownToEnsembl = {
-                return(c("name","value"))
-            },
-            ensemblSource = {
-                return(c("name","source"))
-            },
-            mgcGenes = {
-                return(c("name","chrom","strand","txStart","txEnd","cdsStart",
-                    "cdsEnd","exonCount","exonStarts","exonEnds","score",
-                    "name2","cdsStartStat","cdsEndStat","exonFrames"
-                ))
-            },
-            ensemblToGeneName = {
-                return(c("name","value"))
-            },
-            flyBaseCanonical = {
-                return(c("chrom","chromStart","chromEnd","clusterId",
-                    "transcript","protein"))
-            },
-            flyBaseGene = {
-                return(c("bin","name","chrom","strand","txStart","txEnd",
-                    "cdsStart","cdsEnd","exonCount","exonStarts","exonEnds"))
-            },
-            flyBaseToRefSeq = {
-                return(c("name","value"))
+            close(con)
+            
+            if (!(is(result,"data.frame") 
+                && (ncol(result)==length(attributes)))) {
+                print(head(result))
+                stop("The query to the BioMart webservice returned an invalid ",
+                    "result: the number of columns in the result table does ",
+                    "not equal the number of attributes in the query.\n",
+                    "Please report this on the support site at",
+                    "http://support.bioconductor.org")
             }
-        )
-    }
-}
-
-getUcscQuery <- function(org,type,refdb="ucsc") {
-    type <- tolower(type[1])
-    org <- tolower(org[1])
-    refdb <- tolower(refdb[1])
-    checkTextArgs("type",type,c("gene","exon"))
-    checkTextArgs("org",org,getSupportedOrganisms(),multiarg=FALSE)
-    checkTextArgs("refdb",refdb,c("ucsc","refseq"))
-    switch(type,
-        gene = {
-            switch(refdb,
-                ucsc = {
-                    switch(org,
-                        hg18 = {
-                            return(paste("SELECT knownCanonical.chrom AS ",
-                                "`chromosome`,`chromStart` AS `start`,",
-                                "`chromEnd` AS `end`,`transcript` AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "knownGene.strand AS `strand`,",
-                                "`geneName` AS `gene_name`,'NA' ",
-                                "AS `biotype` FROM `knownCanonical` INNER ",
-                                "JOIN `knownGene` ON ",
-                                "knownCanonical.transcript=knownGene.name ",
-                                "INNER JOIN `knownToRefSeq` ON ",
-                                "knownCanonical.transcript=",
-                                "knownToRefSeq.name ",
-                                "INNER JOIN `refFlat` ON ",
-                                "knownToRefSeq.value=refFlat.name GROUP BY ",
-                                "`transcript_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        hg19 = {
-                            return(paste("SELECT knownCanonical.chrom AS ",
-                                "`chromosome`,`chromStart` AS `start`,",
-                                "`chromEnd` AS `end`,`transcript` AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "knownGene.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`knownCanonical` INNER JOIN `knownGene` ON ",
-                                "knownCanonical.transcript=knownGene.name ",
-                                "INNER JOIN `knownToRefSeq` ON ",
-                                "knownCanonical.transcript=knownToRefSeq.name ",
-                                "INNER JOIN `knownToEnsembl` ON ",
-                                "knownCanonical.transcript=knownToEnsembl.name",
-                                " INNER JOIN `ensemblSource` ON ",
-                                "knownToEnsembl.value=ensemblSource.name ",
-                                "INNER JOIN `refFlat` ON ",
-                                "knownToRefSeq.value=refFlat.name GROUP BY ",
-                                "`transcript_id` ORDER BY `chromosome`,`start`",
-                                sep=""))
-                        },
-                        hg38 = {
-                            return(paste("SELECT knownCanonical.chrom AS ",
-                                "`chromosome`,`chromStart` AS `start`,",
-                                "`chromEnd` AS `end`,`transcript` AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "knownGene.strand AS `strand`,",
-                                "`geneName` AS `gene_name`,'NA' ",
-                                "AS `biotype` FROM `knownCanonical` INNER ",
-                                "JOIN `knownGene` ON ",
-                                "knownCanonical.transcript=knownGene.name ",
-                                "INNER JOIN `knownToRefSeq` ON ",
-                                "knownCanonical.transcript=",
-                                "knownToRefSeq.name ",                                
-                                "INNER JOIN `refFlat` ON ",
-                                "knownToRefSeq.value=refFlat.name GROUP BY ",
-                                "`transcript_id` ORDER BY `chromosome`,`start`",
-                                sep=""))
-                        # Should be the same as hg19 but is like hg18
-                        #return(paste("SELECT knownCanonical.chrom AS ",
-                        #    "`chromosome`,`chromStart` AS `start`,",
-                        #    "`chromEnd` AS `end`,`transcript` AS ",
-                        #    "`transcript_id`,0 AS `gc_content`,",
-                        #    "knownGene.strand AS `strand`,`geneName` AS ",
-                        #    "`gene_name`,`geneType` AS `biotype` FROM ",
-                        #    "`knownCanonical` INNER JOIN `knownGene` ON ",
-                        #    "knownCanonical.transcript=knownGene.name ",
-                        #    "INNER JOIN `knownToRefSeq` ON ",
-                        #    "knownCanonical.transcript=knownToRefSeq.name ",
-                        #    "INNER JOIN `knownToEnsembl` ON ",
-                        #    "knownCanonical.transcript=knownToEnsembl.name",
-                        #    " INNER JOIN `transMapEnsemblV4` ON ",
-                        #    "knownToEnsembl.value=transMapEnsemblV4.geneId ",
-                        #    "INNER JOIN `refFlat` ON ",
-                        #    "knownToRefSeq.value=refFlat.name GROUP BY ",
-                        #    "`transcript_id` ORDER BY `chromosome`, `start`",
-                        #    sep=""))
-                        },
-                        mm9 = {
-                            return(paste("SELECT knownCanonical.chrom AS ",
-                                "`chromosome`,`chromStart` AS `start`,",
-                                "`chromEnd` AS `end`,`transcript` AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "knownGene.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`knownCanonical` INNER JOIN `knownGene` ON ",
-                                "knownCanonical.transcript=knownGene.name ",
-                                "INNER JOIN `knownToRefSeq` ON ",
-                                "knownCanonical.transcript=knownToRefSeq.name ",
-                                "INNER JOIN `knownToEnsembl` ON ",
-                                "knownCanonical.transcript=knownToEnsembl.name",
-                                " INNER JOIN `ensemblSource` ON ",
-                                "knownToEnsembl.value=ensemblSource.name ",
-                                "INNER JOIN `refFlat` ON ",
-                                "knownToRefSeq.value=refFlat.name GROUP BY ",
-                                "`transcript_id` ORDER BY `chromosome`,`start`",
-                                sep=""))
-                        },
-                        mm10 = {
-                            return(paste("SELECT knownCanonical.chrom AS ",
-                                "`chromosome`,`chromStart` AS `start`,",
-                                "`chromEnd` AS `end`,`transcript` AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "knownGene.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`knownCanonical` INNER JOIN `knownGene` ON ",
-                                "knownCanonical.transcript=knownGene.name ",
-                                "INNER JOIN `knownToRefSeq` ON ",
-                                "knownCanonical.transcript=knownToRefSeq.name ",
-                                "INNER JOIN `knownToEnsembl` ON ",
-                                "knownCanonical.transcript=knownToEnsembl.name",
-                                " INNER JOIN `ensemblSource` ON ",
-                                "knownToEnsembl.value=ensemblSource.name ",
-                                "INNER JOIN `refFlat` ON ",
-                                "knownToRefSeq.value=refFlat.name GROUP BY ",
-                                "`transcript_id` ORDER BY `chromosome`,`start`",
-                                sep=""))
-                        },
-                        rn5 = {
-                            return(paste("SELECT mgcGenes.chrom AS ",
-                                "`chromosome`,`txStart` AS `start`,`txEnd` ",
-                                "AS `end`,mgcGenes.name AS `transcript_id`,0 ",
-                                "AS `gc_content`,mgcGenes.strand AS `strand`,",
-                                "`name2` AS `gene_name`,`source` AS `biotype` ",
-                                "FROM `mgcGenes` INNER JOIN ",
-                                "`ensemblToGeneName` ON ",
-                                "mgcGenes.name2=ensemblToGeneName.value INNER ",
-                                "JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        rn6 = {
-                            return(paste("SELECT mgcGenes.chrom AS ",
-                                "`chromosome`,`txStart` AS `start`,`txEnd` ",
-                                "AS `end`,mgcGenes.name AS `transcript_id`,0 ",
-                                "AS `gc_content`,mgcGenes.strand AS `strand`,",
-                                "`name2` AS `gene_name`,`source` AS `biotype` ",
-                                "FROM `mgcGenes` INNER JOIN ",
-                                "`ensemblToGeneName` ON ",
-                                "mgcGenes.name2=ensemblToGeneName.value INNER ",
-                                "JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`, `start`",
-                                sep=""))
-                        },
-                        dm3 = {
-                            return(paste("SELECT flyBaseCanonical.chrom AS ",
-                                "`chromosome`,`chromStart` AS `start`,",
-                                "`chromEnd` AS `end`,`transcript` AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "flyBaseGene.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`flyBaseCanonical` INNER JOIN `flyBaseGene` ",
-                                "ON flyBaseCanonical.transcript=",
-                                "flyBaseGene.name INNER JOIN ",
-                                "`flyBaseToRefSeq` ON ",
-                                "flyBaseCanonical.transcript=",
-                                "flyBaseToRefSeq.name INNER JOIN `refFlat` ON ",
-                                "flyBaseToRefSeq.value=refFlat.name INNER ",
-                                "JOIN `ensemblToGeneName` ON ",
-                                "ensemblToGeneName.value=refFlat.geneName ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        dm6 = {
-                            warning("No UCSC Genome annotation for Drosophila ",
-                                "melanogaster v6! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,",
-                                "`geneName` AS `gene_name`,",
-                                "`source` AS `biotype` FROM `refFlat` INNER ",
-                                "JOIN `ensemblToGeneName` ON ",
-                                "ensemblToGeneName.value=refFlat.geneName ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        danrer7 = {
-                            return(paste("SELECT mgcGenes.chrom AS ",
-                                "`chromosome`,`txStart` AS `start`,`txEnd` ",
-                                "AS `end`,mgcGenes.name AS `transcript_id`,0 ",
-                                "AS `gc_content`,mgcGenes.strand AS `strand`,",
-                                "`name2` AS `gene_name`,`source` AS `biotype` ",
-                                "FROM `mgcGenes` INNER JOIN ",
-                                "`ensemblToGeneName` ON ",
-                                "mgcGenes.name2=ensemblToGeneName.value INNER ",
-                                "JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        danrer10 = {
-                            return(paste("SELECT mgcGenes.chrom AS ",
-                                "`chromosome`,`txStart` AS `start`,`txEnd` ",
-                                "AS `end`,mgcGenes.name AS `transcript_id`,0 ",
-                                "AS `gc_content`,mgcGenes.strand AS `strand`,",
-                                "`name2` AS `gene_name`,`source` AS `biotype` ",
-                                "FROM `mgcGenes` INNER JOIN ",
-                                "`ensemblToGeneName` ON ",
-                                "mgcGenes.name2=ensemblToGeneName.value INNER ",
-                                "JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        pantro4 = {
-                            warning("No UCSC Genome annotation for Pan ",
-                                "troglodytes v4! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        pantro5 = {
-                            warning("No UCSC Genome annotation for Pan ",
-                                "troglodytes v5! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        susscr3 = {
-                            warning("No UCSC Genome annotation for Sus ",
-                                "scrofa v3! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(paste(
-                                "SELECT refFlat.chrom AS `chromosome`,",
-                                "refFlat.txStart AS `start`, refFlat.txEnd AS ",
-                                "`end`, refFlat.name AS `transcript_id`, 0 AS ",
-                                "`gc_content`, refFlat.strand AS `strand`,",
-                                "`geneName` AS `gene_name`, `source` AS ",
-                                "`biotype` FROM `refFlat` INNER JOIN ",
-                                "`ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""
-                            ))
-                        },
-                        susscr11 = {
-                            warning("No UCSC Genome annotation for Sus ",
-                                "scrofa v11! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(paste(
-                                "SELECT refFlat.chrom AS `chromosome`,",
-                                "refFlat.txStart AS `start`, refFlat.txEnd AS ",
-                                "`end`, refFlat.name AS `transcript_id`, 0 AS ",
-                                "`gc_content`, refFlat.strand AS `strand`,",
-                                "`geneName` AS `gene_name`, `source` AS ",
-                                "`biotype` FROM `refFlat` INNER JOIN ",
-                                "`ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""
-                            ))
-                        },
-                        equcab2 = {
-                            warning("No UCSC Genome annotation for Equus ",
-                                "caballus v2! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(paste(
-                                "SELECT refFlat.chrom AS `chromosome`,",
-                                "refFlat.txStart AS `start`, refFlat.txEnd AS ",
-                                "`end`, refFlat.name AS `transcript_id`, 0 AS ",
-                                "`gc_content`, refFlat.strand AS `strand`,",
-                                "`geneName` AS `gene_name`, `source` AS ",
-                                "`biotype` FROM `refFlat` INNER JOIN ",
-                                "`ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""
-                            ))
-                        }
-                    )
-                },
-                refseq = {
-                    switch(org,
-                        hg18 = {
-                            return(paste("SELECT  refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,",
-                                "`geneName` AS `gene_name`,'NA' ",
-                                "AS `biotype` FROM `refFlat` INNER JOIN ",
-                                "`knownToRefSeq` ON ",
-                                "refFlat.name=knownToRefSeq.value INNER JOIN ",
-                                "`knownCanonical` ON ",
-                                "knownToRefSeq.name=knownCanonical.transcript ",
-                                "GROUP BY refFlat.name ORDER BY `chromosome`,",
-                                " `start`",
-                                sep=""))
-                        },
-                        hg19 = {
-                            return(paste("SELECT  refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `knownToRefSeq` ON ",
-                                "refFlat.name=knownToRefSeq.value INNER ",
-                                "JOIN `knownCanonical` ON ",
-                                "knownToRefSeq.name=knownCanonical.transcript ",
-                                "INNER JOIN `knownToEnsembl` ON ",
-                                "knownCanonical.transcript=knownToEnsembl.name",
-                                " INNER JOIN `ensemblSource` ON ",
-                                "knownToEnsembl.value=ensemblSource.name ",
-                                "GROUP BY refFlat.name ORDER BY `chromosome`,",
-                                " `start`",
-                                sep=""))
-                        },
-                        hg38 = {
-                            return(paste("SELECT  refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,",
-                                "`geneName` AS `gene_name`,'NA' ",
-                                "AS `biotype` FROM `refFlat` INNER JOIN ",
-                                "`knownToRefSeq` ON ",
-                                "refFlat.name=knownToRefSeq.value INNER JOIN ",
-                                "`knownCanonical` ON ",
-                                "knownToRefSeq.name=knownCanonical.transcript ",
-                                "GROUP BY refFlat.name ORDER BY `chromosome`,",
-                                " `start`",
-                                sep=""))
-                            # Should be the same as hg19 but is as hg18
-                        },
-                        mm9 = {
-                            return(paste("SELECT  refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `knownToRefSeq` ON ",
-                                "refFlat.name=knownToRefSeq.value INNER ",
-                                "JOIN `knownCanonical` ON ",
-                                "knownToRefSeq.name=knownCanonical.transcript ",
-                                "INNER JOIN `knownToEnsembl` ON ",
-                                "knownCanonical.transcript=knownToEnsembl.name",
-                                " INNER JOIN `ensemblSource` ON ",
-                                "knownToEnsembl.value=ensemblSource.name ",
-                                "GROUP BY refFlat.name ORDER BY `chromosome`,",
-                                " `start`",
-                                sep=""))
-                        },
-                        mm10 = {
-                            return(paste("SELECT  refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `knownToRefSeq` ON ",
-                                "refFlat.name=knownToRefSeq.value INNER ",
-                                "JOIN `knownCanonical` ON ",
-                                "knownToRefSeq.name=knownCanonical.transcript ",
-                                "INNER JOIN `knownToEnsembl` ON ",
-                                "knownCanonical.transcript=knownToEnsembl.name",
-                                " INNER JOIN `ensemblSource` ON ",
-                                "knownToEnsembl.value=ensemblSource.name ",
-                                "GROUP BY refFlat.name ORDER BY `chromosome`,",
-                                " `start`",
-                                sep=""))
-                        },
-                        rn5 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        rn6 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        dm3 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,",
-                                "`geneName` AS `gene_name`,",
-                                "`source` AS `biotype` FROM `refFlat` INNER ",
-                                "JOIN `ensemblToGeneName` ON ",
-                                "ensemblToGeneName.value=refFlat.geneName ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        dm6 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` ",
-                                "FROM `refFlat` INNER ",
-                                "JOIN `ensemblToGeneName` ON ",
-                                "ensemblToGeneName.value=refFlat.geneName ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`, `start`",
-                                sep=""))
-                        },
-                        danrer7 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        danrer10 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        pantro4 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        pantro5 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.txStart AS `start`,",
-                                "refFlat.txEnd AS `end`,refFlat.name AS ",
-                                "`transcript_id`,0 AS `gc_content`,",
-                                "refFlat.strand AS `strand`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        susscr3 = {
-                            return(paste(
-                                "SELECT refFlat.chrom AS `chromosome`,",
-                                "refFlat.txStart AS `start`, refFlat.txEnd AS ",
-                                "`end`, refFlat.name AS `transcript_id`, 0 AS ",
-                                "`gc_content`, refFlat.strand AS `strand`,",
-                                "`geneName` AS `gene_name`, `source` AS ",
-                                "`biotype` FROM `refFlat` INNER JOIN ",
-                                "`ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""
-                            ))
-                        },
-                        susscr11 = {
-                            return(paste(
-                                "SELECT refFlat.chrom AS `chromosome`,",
-                                "refFlat.txStart AS `start`, refFlat.txEnd AS ",
-                                "`end`, refFlat.name AS `transcript_id`, 0 AS ",
-                                "`gc_content`, refFlat.strand AS `strand`,",
-                                "`geneName` AS `gene_name`, `source` AS ",
-                                "`biotype` FROM `refFlat` INNER JOIN ",
-                                "`ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""
-                            ))
-                        },
-                        equcab2 = {
-                            return(paste(
-                                "SELECT refFlat.chrom AS `chromosome`,",
-                                "refFlat.txStart AS `start`, refFlat.txEnd AS ",
-                                "`end`, refFlat.name AS `transcript_id`, 0 AS ",
-                                "`gc_content`, refFlat.strand AS `strand`,",
-                                "`geneName` AS `gene_name`, `source` AS ",
-                                "`biotype` FROM `refFlat` INNER JOIN ",
-                                "`ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""
-                            ))
-                        }
-                    )
-                }
-            )
-        },
-        exon = {
-            switch(refdb,
-                ucsc = {
-                    switch(org,
-                        hg18 = {
-                            return(paste("SELECT knownGene.chrom AS ",
-                                "`chromosome`,knownGene.exonStarts AS `start`,",
-                                "knownGene.exonEnds AS `end`,knownGene.name ",
-                                "AS `exon_id`,knownGene.strand AS `strand`,",
-                                "`transcript` AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,'NA' AS `biotype` FROM ",
-                                "`knownGene` INNER JOIN `knownCanonical` ON ",
-                                "knownGene.name=knownCanonical.transcript ",
-                                "INNER JOIN `knownToRefSeq` ON ",
-                                "knownCanonical.transcript=knownToRefSeq.name ",
-                                "INNER JOIN `refFlat` ON ",
-                                "knownToRefSeq.value=refFlat.name GROUP BY ",
-                                "knownGene.name ORDER BY `chromosome`, `start`",
-                                sep=""))
-                        },
-                        hg19 = {
-                            return(paste("SELECT knownGene.chrom AS ",
-                                "`chromosome`,knownGene.exonStarts AS `start`,",
-                                "knownGene.exonEnds AS `end`,knownGene.name ",
-                                "AS `exon_id`,knownGene.strand AS `strand`,",
-                                "`transcript` AS `transcript_id`,`geneName` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`knownGene` INNER JOIN `knownCanonical` ON ",
-                                "knownGene.name=knownCanonical.transcript ",
-                                "INNER JOIN `knownToRefSeq` ON ",
-                                "knownCanonical.transcript=knownToRefSeq.name ",
-                                "INNER JOIN `knownToEnsembl` ON ",
-                                "knownCanonical.transcript=knownToEnsembl.name",
-                                " INNER JOIN `ensemblSource` ON ",
-                                "knownToEnsembl.value=ensemblSource.name ",
-                                "INNER JOIN `refFlat` ON ",
-                                "knownToRefSeq.value=refFlat.name GROUP BY ",
-                                "knownGene.name ORDER BY `chromosome`, `start`",
-                                sep=""))
-                        },
-                        hg38 = {
-                            return(paste("SELECT knownGene.chrom AS ",
-                                "`chromosome`,knownGene.exonStarts AS `start`,",
-                                "knownGene.exonEnds AS `end`,knownGene.name ",
-                                "AS `exon_id`,knownGene.strand AS `strand`,",
-                                "`transcript` AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,'NA' AS `biotype` FROM ",
-                                "`knownGene` INNER JOIN `knownCanonical` ON ",
-                                "knownGene.name=knownCanonical.transcript ",
-                                "INNER JOIN `knownToRefSeq` ON ",
-                                "knownCanonical.transcript=knownToRefSeq.name ",
-                                "INNER JOIN `refFlat` ON ",
-                                "knownToRefSeq.value=refFlat.name GROUP BY ",
-                                "knownGene.name ORDER BY `chromosome`, `start`",
-                                sep=""))
-                            # Should be the same as hg19 but is as hg18
-                        },
-                        mm9 = {
-                            return(paste("SELECT knownGene.chrom AS ",
-                                "`chromosome`,knownGene.exonStarts AS `start`,",
-                                "knownGene.exonEnds AS `end`,knownGene.name ",
-                                "AS `exon_id`,knownGene.strand AS `strand`,",
-                                "`transcript` AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`knownGene` INNER JOIN `knownCanonical` ON ",
-                                "knownGene.name=knownCanonical.transcript ",
-                                "INNER JOIN `knownToRefSeq` ON ",
-                                "knownCanonical.transcript=knownToRefSeq.name ",
-                                "INNER JOIN `knownToEnsembl` ON ",
-                                "knownCanonical.transcript=knownToEnsembl.name",
-                                " INNER JOIN `ensemblSource` ON ",
-                                "knownToEnsembl.value=ensemblSource.name ",
-                                "INNER JOIN `refFlat` ON ",
-                                "knownToRefSeq.value=refFlat.name GROUP BY ",
-                                "knownGene.name ORDER BY `chromosome`, `start`",
-                                sep=""))
-                        },
-                        mm10 = {
-                            return(paste("SELECT knownGene.chrom AS ",
-                                "`chromosome`,knownGene.exonStarts AS `start`,",
-                                "knownGene.exonEnds AS `end`,knownGene.name ",
-                                "AS `exon_id`,knownGene.strand AS `strand`,",
-                                "`transcript` AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`knownGene` INNER JOIN `knownCanonical` ON ",
-                                "knownGene.name=knownCanonical.transcript ",
-                                "INNER JOIN `knownToRefSeq` ON ",
-                                "knownCanonical.transcript=knownToRefSeq.name ",
-                                "INNER JOIN `knownToEnsembl` ON ",
-                                "knownCanonical.transcript=knownToEnsembl.name",
-                                " INNER JOIN `ensemblSource` ON ",
-                                "knownToEnsembl.value=ensemblSource.name ",
-                                "INNER JOIN `refFlat` ON ",
-                                "knownToRefSeq.value=refFlat.name GROUP BY ",
-                                "knownGene.name ORDER BY `chromosome`, `start`",
-                                sep=""))
-                        },
-                        rn5 = {
-                            return(paste("SELECT mgcGenes.chrom AS ",
-                                "`chromosome`,`exonStarts` AS `start`,",
-                                "`exonEnds` AS `end`,mgcGenes.name AS ",
-                                "`exon_id`,mgcGenes.strand AS `strand`,",
-                                "mgcGenes.name AS `transcript_id`,`name2` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`mgcGenes` INNER JOIN `ensemblToGeneName` ON ",
-                                "mgcGenes.name2=ensemblToGeneName.value INNER ",
-                                "JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        rn6 = {
-                            return(paste("SELECT mgcGenes.chrom AS ",
-                                "`chromosome`,`exonStarts` AS `start`,",
-                                "`exonEnds` AS `end`,mgcGenes.name AS ",
-                                "`exon_id`,mgcGenes.strand AS `strand`,",
-                                "mgcGenes.name AS `transcript_id`,`name2` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`mgcGenes` INNER JOIN `ensemblToGeneName` ON ",
-                                "mgcGenes.name2=ensemblToGeneName.value INNER ",
-                                "JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        dm3 = {
-                            return(paste("SELECT flyBaseCanonical.chrom AS ",
-                                "`chromosome`,flyBaseGene.exonStarts AS ",
-                                "`start`,flyBaseGene.exonEnds AS `end`,",
-                                "`transcript` AS `exon_id`,flyBaseGene.strand ",
-                                "AS `strand`,`transcript` AS `transcript_id`,",
-                                "`geneName` AS `gene_name`,`source` AS ",
-                                "`biotype` FROM `flyBaseCanonical` INNER JOIN ",
-                                "`flyBaseGene` ON ",
-                                "flyBaseCanonical.transcript=flyBaseGene.name ",
-                                "INNER JOIN `flyBaseToRefSeq` ON ",
-                                "flyBaseCanonical.transcript=",
-                                "flyBaseToRefSeq.name INNER JOIN `refFlat` ON ",
-                                "flyBaseToRefSeq.value=refFlat.name ",
-                                "INNER JOIN `ensemblToGeneName` ON ",
-                                "ensemblToGeneName.value=refFlat.geneName ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        dm6 = {
-                            warning("No UCSC Genome annotation for Drosophila ",
-                                "melanogaster v6! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "ensemblToGeneName.value=refFlat.geneName ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        danrer7 = {
-                            return(paste("SELECT mgcGenes.chrom AS ",
-                                "`chromosome`,`exonStarts` AS `start`,",
-                                "`exonEnds` AS `end`,mgcGenes.name AS ",
-                                "`exon_id`,mgcGenes.strand AS `strand`,",
-                                "mgcGenes.name AS `transcript_id`,`name2` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`mgcGenes` INNER JOIN `ensemblToGeneName` ON ",
-                                "mgcGenes.name2=ensemblToGeneName.value INNER ",
-                                "JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        danrer10 = {
-                            return(paste("SELECT mgcGenes.chrom AS ",
-                                "`chromosome`,`exonStarts` AS `start`,",
-                                "`exonEnds` AS `end`,mgcGenes.name AS ",
-                                "`exon_id`,mgcGenes.strand AS `strand`,",
-                                "mgcGenes.name AS `transcript_id`,`name2` AS ",
-                                "`gene_name`,`source` AS `biotype` FROM ",
-                                "`mgcGenes` INNER JOIN `ensemblToGeneName` ON ",
-                                "mgcGenes.name2=ensemblToGeneName.value INNER ",
-                                "JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        pantro4 = {
-                            warning("No UCSC Genome annotation for Pan ",
-                                "troglodytes v4! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        pantro5 = {
-                            warning("No UCSC Genome annotation for Pan ",
-                                "troglodytes v5! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        susscr3 = {
-                            warning("No UCSC Genome annotation for Sus ",
-                                "scrofa v3! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        susscr11 = {
-                            warning("No UCSC Genome annotation for Sus ",
-                                "scrofa v11! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        equcab2 = {
-                            warning("No UCSC Genome annotation for Equus ",
-                                "caballus v11! Will use RefSeq instead...",
-                                immediate.=TRUE)
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        }
-                    )
-                },
-                refseq = {
-                    switch(org,
-                        hg18 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,'NA' AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `knownToRefSeq` ON ",
-                                "refFlat.name=knownToRefSeq.value INNER JOIN ",
-                                "`knownCanonical` ON ",
-                                "knownToRefSeq.name=knownCanonical.transcript ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        hg19 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `knownToRefSeq` ON ",
-                                "refFlat.name=knownToRefSeq.value INNER JOIN ",
-                                "`knownCanonical` ON ",
-                                "knownToRefSeq.name=knownCanonical.transcript ",
-                                "INNER JOIN `knownToEnsembl` ON ",
-                                "knownCanonical.transcript=knownToEnsembl.name",
-                                " INNER JOIN `ensemblSource` ON ",
-                                "knownToEnsembl.value=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        hg38 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,'NA' AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `knownToRefSeq` ON ",
-                                "refFlat.name=knownToRefSeq.value INNER JOIN ",
-                                "`knownCanonical` ON ",
-                                "knownToRefSeq.name=knownCanonical.transcript ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                            # Should be the same as hg19 but is as hg18
-                        },
-                        mm9 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `knownToRefSeq` ON ",
-                                "refFlat.name=knownToRefSeq.value INNER JOIN ",
-                                "`knownCanonical` ON ",
-                                "knownToRefSeq.name=knownCanonical.transcript ",
-                                "INNER JOIN `knownToEnsembl` ON ",
-                                "knownCanonical.transcript=knownToEnsembl.name",
-                                " INNER JOIN `ensemblSource` ON ",
-                                "knownToEnsembl.value=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        mm10 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `knownToRefSeq` ON ",
-                                "refFlat.name=knownToRefSeq.value INNER JOIN ",
-                                "`knownCanonical` ON ",
-                                "knownToRefSeq.name=knownCanonical.transcript ",
-                                "INNER JOIN `knownToEnsembl` ON ",
-                                "knownCanonical.transcript=knownToEnsembl.name",
-                                " INNER JOIN `ensemblSource` ON ",
-                                "knownToEnsembl.value=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        rn5 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        rn6 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        dm3 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "ensemblToGeneName.value=refFlat.geneName ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        dm6 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "ensemblToGeneName.value=refFlat.geneName ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `transcript_id` ORDER BY ",
-                                "`chromosome`,`start`",
-                                sep=""))
-                        },
-                        danrer7 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        danrer10 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        pantro4 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        pantro5 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        susscr3 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        susscr11 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        },
-                        equcab2 = {
-                            return(paste("SELECT refFlat.chrom AS ",
-                                "`chromosome`,refFlat.exonStarts AS `start`,",
-                                "refFlat.exonEnds AS `end`,refFlat.name AS ",
-                                "`exon_id`,refFlat.strand AS `strand`,",
-                                "refFlat.name AS `transcript_id`,`geneName` ",
-                                "AS `gene_name`,`source` AS `biotype` FROM ",
-                                "`refFlat` INNER JOIN `ensemblToGeneName` ON ",
-                                "refFlat.geneName=ensemblToGeneName.value ",
-                                "INNER JOIN `ensemblSource` ON ",
-                                "ensemblToGeneName.name=ensemblSource.name ",
-                                "GROUP BY `exon_id` ORDER BY `chromosome`, ",
-                                "`start`",
-                                sep=""))
-                        }
-                    )
-                }
-            )
         }
-    )
+        
+        resultList[[i]] <- biomaRt:::.setResultColNames(result,mart=mart,
+            attributes=attributes,bmHeader=bmHeader)
+    }
+    
+    # collate results
+    result <- do.call('rbind',resultList)
+    return(result)
 }
 
-getUcscCredentials <- function() {
-    return(c(
-        host="genome-mysql.cse.ucsc.edu",
-        user="genome",
-        password=""
-    ))
+.mySubmitQueryXML <- function (host, query) {
+    httr::set_config(httr::config(http_version = 1L))
+    res <- httr::POST(url = host, body = list(query = query),
+        httr::timeout(1000))
+    if (httr::status_code(res) == 302) {
+        host <- stringr::str_match(string=res$all_headers[[1]]$headers$location,
+            pattern = "//([a-zA-Z./]+)\\??;?redirectsrc")[, 2]
+        res <- httr::POST(url = host, body = list(query = query),
+            config = list(httr::timeout(1000)))
+    }
+    return(suppressMessages(httr::content(res)))
+}
+
+.userOrg <- function(org,db=NULL) {
+    ua <- getUserAnnotations(db)
+    if (nrow(ua) == 0)
+        return(FALSE)
+    orgs <- unique(ua$organism)
+    return(org %in% orgs)
+}
+
+.userRefdb <- function(refdb,db=NULL) {
+    us <- getUserAnnotations(db)
+    if (nrow(us) == 0)
+        return(FALSE)
+    refdbs <- unique(us$source)
+    return(refdb %in% refdbs)
+}
+
+buildAnnotationStore <- function(organisms,sources,
+    home=file.path(path.expand("~"),".recoup"),forceDownload=TRUE,rc=NULL) {
+    .Deprecated("buildAnnotationDatabase")
+    buildAnnotationDatabase(organisms,sources,forceDownload=forceDownload,rc=rc)
 }

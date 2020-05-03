@@ -3,7 +3,7 @@ checkMainArgs <- function(main.args) {
     valid.args <- c("input","design","region","type","signal","genome","refdb",
         "flank","fraction","orderBy","binParams","selector","preprocessParams",
         "plotParams","saveParams","kmParams","strandedParams","ggplotParams",
-        "complexHeatmapParams","bamParams","onTheFly","localDbHome","rc")
+        "complexHeatmapParams","bamParams","onTheFly","localDb","rc")
     invalid <- setdiff(in.args,valid.args)
     if (length(invalid) > 0) {
         for (i in 1:length(invalid))

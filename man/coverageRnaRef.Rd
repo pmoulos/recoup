@@ -26,7 +26,7 @@
     Same as input with the \code{ranges} fields filled.
 }
 \description{
-    *This function is deprecated! Please use
+    *This function is defunct! Please use
     \code{\link{coverageRef}}.*
     This function fills the \code{coverage} field in the
     main \code{input} argument in \code{\link{recoup}} 
@@ -34,7 +34,7 @@
 }
 \examples{
 # Load some data
-data("recoup_test_data",package="recoup")
+#data("recoup_test_data",package="recoup")
 
 # Note: the figures that will be produced will not look 
 # realistic or pretty and will be "bumpy". This is because 
@@ -44,12 +44,12 @@ data("recoup_test_data",package="recoup")
 # vignette on how to test with more realistic data.
 
 # Calculate coverages
-testGenomeRanges <- makeGRangesFromDataFrame(df=test.genome,
-    keep.extra.columns=TRUE)
-test.input <- coverageRef(
-    test.input,
-    mainRanges=test.exons
-)
+#testGenomeRanges <- makeGRangesFromDataFrame(df=test.genome,
+#    keep.extra.columns=TRUE)
+#test.input <- coverageRef(
+#    test.input,
+#    mainRanges=test.exons
+#)
 }
 \author{
     Panagiotis Moulos

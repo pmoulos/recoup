@@ -83,7 +83,7 @@ splitVector <- function(x,n,flank,where,interp,stat) {
     #S <- split(x,f)
     #return(llply(S,stat))
     S <- split(1:length(x),f)
-    s <- sapply(S,function(x) x[1])
+    s <- vapply(S,function(x) x[1],integer(1))
     return(aggregate(x,FUN=stat,start=s,width=binFac))
 }
 

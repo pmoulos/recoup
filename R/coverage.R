@@ -1,9 +1,9 @@
 coverageRef <- function(input,mainRanges,
     strandedParams=list(strand=NULL,ignoreStrand=TRUE),rc=NULL) {
-    hasCoverage <- sapply(input,function(x) is.null(x$coverage))
+    hasCoverage <- vapply(input,function(x) is.null(x$coverage),logical(1))
     if (!any(hasCoverage))
         return(input)
-    names(input) <- sapply(input,function(x) return(x$id))
+    names(input) <- vapply(input,function(x) return(x$id),character(1))
     for (n in names(input)) {
         message("Calculating requested regions coverage for ",input[[n]]$name)
         if (!is.null(input[[n]]$ranges))
@@ -20,24 +20,8 @@ coverageRef <- function(input,mainRanges,
 
 coverageRnaRef <- function(input,mainRanges,
     strandedParams=list(strand=NULL,ignoreStrand=TRUE),rc=NULL) {
-    .Deprecated("coverageRef")
-    return(coverageRef(input,mainRanges,strandedParams,rc=NULL))
-    #hasCoverage <- sapply(input,function(x) is.null(x$coverage))
-    #if (!any(hasCoverage))
-    #    return(input)
-    #names(input) <- sapply(input,function(x) return(x$id))
-    #for (n in names(input)) {
-    #    message("Calculating genebody exon coverage for ",input[[n]]$name)
-    #    if (!is.null(input[[n]]$ranges))
-    #        theRanges <- splitBySeqname(input[[n]]$ranges)
-    #    else
-    #        theRanges <- input[[n]]$file
-    #    input[[n]]$coverage <- calcCoverage(theRanges,mainRanges,
-    #        strand=strandedParams$strand,
-    #        ignore.strand=strandedParams$ignoreStrand,rc=rc)
-    #    names(input[[n]]$coverage) <- names(mainRanges)
-    #}
-    #return(input)
+    .Defunct("coverageRef")
+    #return(coverageRef(input,mainRanges,strandedParams,rc=NULL))
 }
 
 calcCoverage <- function(input,mask,strand=NULL,ignore.strand=TRUE,rc=NULL) {
@@ -155,7 +139,11 @@ coverageFromBigWig <- function(input,mask,rc=NULL) {
     if (!requireNamespace("rtracklayer"))
         stop("R package rtracklayer is required to calculate coverage from ",
             "BigWig files!")
-    preCov <- import.bw(input,selection=BigWigSelection(mask),as="RleList")
+    if (is(mask,"GRanges"))
+        preCov <- import.bw(input,selection=BigWigSelection(mask),as="RleList")
+    else if (is(mask,"GRangesList"))
+        preCov <- import.bw(input,selection=BigWigSelection(trim(unlist(mask))),
+            as="RleList")
     chrs <- names(preCov)
     #
     if (all(is.na(seqlengths(mask))))
@@ -170,13 +158,14 @@ coverageFromBigWig <- function(input,mask,rc=NULL) {
         names(covs) <- names(mask)
         return(covs)
     }
-    else if (is(x,"GRangesList"))
+    else if (is(mask,"GRangesList"))
         return(lazyRangesListCoverage(mask,preCov,chrs,rc=rc))
 }
 
 coverageFromBam <- function(input,mask,ignore.strand,
     pp=list(spliceAction="keep",spliceRemoveQ=0.75),rc=NULL) {
     bamFile <- input
+    mask <- .subsetGRangesByBamHeader(mask,bamFile)
     if (is(mask,"GRanges")) {
         chrs <- as.character(unique(seqnames(mask)))
         maskList <- split(mask,seqnames(mask))
@@ -214,7 +203,7 @@ coverageFromBam <- function(input,mask,ignore.strand,
         chrs <- as.character(unique(seqnames(Mraw)))
         maskList <- split(Mraw,seqnames(Mraw))
         maskList <- maskList[chrs]
-        covs <- lapply(chrs,function(x,maskList) {
+        covs <- cmclapply(chrs,function(x,maskList) {
             message("  Reading sequence ",x)
             M <- maskList[[x]]
             if (!is.null(M)) {
@@ -230,8 +219,8 @@ coverageFromBam <- function(input,mask,ignore.strand,
                         names(cot) <- names(M)
                         inv <- which(strand(M)=="-")
                         cot[inv] <- lapply(cot[inv],rev)
-                        genes <- sapply(strsplit(names(cot),".",fixed=TRUE),
-                            function(x) { return(x[2]) })
+                        genes <- vapply(strsplit(names(cot),".",fixed=TRUE),
+                            function(x) { return(x[1]) },character(1))
                         names(cot) <- genes
                         ugenes <- unique(genes)
                         cot <- cmclapply(ugenes,function(x,cot) {
@@ -246,9 +235,16 @@ coverageFromBam <- function(input,mask,ignore.strand,
                     return(Rle(NA))
                 }
             }
-        })
+        },maskList,rc=rc)
+        names(covs) <- chrs
         covs <- unlist(covs)
-        names(covs) <- names(mask)
+        nas <- which(vapply(covs,function(x) any(is.na(x)),logical(1)))
+        if (length(nas) > 0)
+            covs <- covs[-nas]
+        nn <- vapply(strsplit(names(covs),".",fixed=TRUE),function(x) {
+            return(x[2])
+        },character(1))
+        names(covs) <- nn
         return(covs)
     }
 }
@@ -283,26 +279,33 @@ lazyRangesCoverage <- function(x,maskList,preCov,normFactor=NULL) {
 lazyRangesListCoverage <- function(mask,preCov,chrs,rc=NULL) {
     # Collapse the summarized exons structure
     Mraw <- trim(unlist(mask))
+    
     # ...and split per chromosome
     maskList <- split(Mraw,seqnames(Mraw))
     maskList <- maskList[chrs]
+    
     # ...finally construct Views like the simple ChIP-Seq case
     # Profiling showed that the RNA-Seq case does not benefit from 
     # parallelization of the outer loop as in the ChIP-Seq case
     V <- Views(preCov,ranges(maskList))
+    
     # Coverage and handling strand
     covs <- unlist(viewApply(V,function(x) x))
     Msimple <- unlist(maskList)
+    
+    ## !!!For some peculiar reason, inv is not needed in the list case!!!
+    ## ->!!!I think I had this wrong from the beginning...!!!<-
     #inv <- which(strand(Msimple)=="-")
     inv <- which(as.logical(strand(Msimple)=="-"))
     if (length(inv) > 0)
         covs[inv] <- cmclapply(covs[inv],rev,rc=rc)
+    
     # Now we must reconstruct the initial summarized exon structure
     names(covs) <- names(Msimple)
     # Get unique gene names from composite Rle list names
-    genes <- sapply(strsplit(names(covs),".",fixed=TRUE),function(x) {
+    genes <- vapply(strsplit(names(covs),".",fixed=TRUE),function(x) {
         return(x[2])
-    })
+    },character(1))
     names(covs) <- genes
     ugenes <- unique(genes)
     # Finally, reconstruct a gene coverage Rle
