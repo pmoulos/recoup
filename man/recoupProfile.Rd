@@ -45,11 +45,11 @@ test.tss <- recoup(
     flank=c(2000,2000),
     selector=NULL,
     plotParams=list(profile=FALSE,heatmap=FALSE),
-    rc=0.5
+    rc=0.1
 )
 
 # Plot coverage profiles
-recoupProfile(test.tss,rc=0.5)
+recoupProfile(test.tss,rc=0.1)
 }
 \author{
     Panagiotis Moulos

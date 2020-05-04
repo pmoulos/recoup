@@ -1,12 +1,12 @@
 preprocessRanges <- function(input,preprocessParams,genome,bamRanges=NULL,
     bamParams=NULL,rc=NULL) {
-    hasRanges <- sapply(input,function(x) is.null(x$ranges))
+    hasRanges <- vapply(input,function(x) is.null(x$ranges),logical(1))
     if (!any(hasRanges))
         return(input)
     # Else, BAM/BED files must be read, so we check if they exist
-    if (!all(sapply(input,function(x) {
+    if (!all(vapply(input,function(x) {
         file.exists(x$file)
-    })))
+    },logical(1))))
         stop("One or more input files cannot be found! Check the validity of ",
             "the file paths.")
     
@@ -51,7 +51,7 @@ preprocessRanges <- function(input,preprocessParams,genome,bamRanges=NULL,
                 downstream=0)
             bamRanges <- resize(bamRanges,width=w+2*preprocessParams$fragLen)
         }
-        bi <- sapply(input,function(x) {
+        bi <- vapply(input,function(x) {
             if (!is.null(x$format)) {
                 if (x$format == "bigwig")
                     return(TRUE)
@@ -62,7 +62,7 @@ preprocessRanges <- function(input,preprocessParams,genome,bamRanges=NULL,
                     return(TRUE)
             }
             return(file.exists(paste0(x$file,".bai")))
-        })
+        },logical(1))
         if (!all(bi)) {
             nbi <- which(!bi)
             cmclapply(nbi,prepareBam,input,rc=rc)
@@ -476,9 +476,9 @@ splitRangesList <- function(x,n,type=c("variable","fixed"),flank=NULL,
                 theTiles <- splitRanges(x,n)
                 # They have wrong names
                 names(theTiles) <- 
-                    sapply(strsplit(names(x),".",fixed=TRUE),function(x) { 
+                    vapply(strsplit(names(x),".",fixed=TRUE),function(x) { 
                         return(x[1]) 
-                    })
+                    },character(1))
                 return(theTiles)
             },
             downstream = {
@@ -488,9 +488,9 @@ splitRangesList <- function(x,n,type=c("variable","fixed"),flank=NULL,
                 theTiles <- splitRanges(x,n)
                 # They have wrong names
                 names(theTiles) <- 
-                    sapply(strsplit(names(x),".",fixed=TRUE),function(x) { 
+                    vapply(strsplit(names(x),".",fixed=TRUE),function(x) { 
                         return(x[1]) 
-                    })
+                    },character(1))
                 return(theTiles)
             }
         )
@@ -498,12 +498,12 @@ splitRangesList <- function(x,n,type=c("variable","fixed"),flank=NULL,
     
     # Resplit and reorder
     geme <- strsplit(names(x),".",fixed=TRUE)
-    genes <- sapply(geme,function(x) {
+    genes <- vapply(geme,function(x) {
         return(x[1])
-    })
-    names(x) <- sapply(geme,function(x) {
+    },character(1))
+    names(x) <- vapply(geme,function(x) {
         return(x[2])
-    })
+    },character(1))
     tmp <- split(x,genes)
     tmp <- tmp[theOrder]
     
@@ -527,7 +527,7 @@ splitRangesList <- function(x,n,type=c("variable","fixed"),flank=NULL,
     # from w above through the flag list member and remove the exons that can't
     # be binned because of the allowed number of bins
     message("  veryfiying the bin sizes (may take a few minutes)")
-    flagInd <- which(sapply(w,function(a) return(a$flag)))
+    flagInd <- which(vapply(w,function(a) return(a$flag),numeric(1)))
     for (i in flagInd) { # How many can they be...
         message("    veryfying ",i)
         gr <- GRangesList(tmp[[i]][w[[i]]$exonsToUse])
@@ -566,9 +566,9 @@ splitRangesList <- function(x,n,type=c("variable","fixed"),flank=NULL,
     # don't need a regex) and fixed=TRUE
     # FIXME: The split approach won't work properly with UCSC accessions as
     # they contain dots (.). We need to figure this out.
-    tileGenes <- sapply(strsplit(names(theTiles),".",fixed=TRUE),function(x) {
+    tileGenes <- vapply(strsplit(names(theTiles),".",fixed=TRUE),function(x) {
         return(x[1])
-    })
+    },character(1))
     # We need only the gene names in the end, the tiles must be anonymous
     theTiles <- unname(theTiles)
     # ...and this should conclude

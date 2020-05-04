@@ -67,7 +67,7 @@ test.input <- rpMatrix(
     flank=c(2000,2000),
     binParams=list(flankBinSize=50,regionBinSize=150,binType="fixed",
         sumStat="mean",interpolation="spline"),
-    rc=0.5
+    rc=0.1
 )
 }
 \author{

@@ -9,7 +9,7 @@ test_recoup <- function() {
         genome=test.genome,
         flank=c(2000,2000),
         selector=NULL,
-        rc=0.5
+        rc=0.1
     )
     
     test.gb <- recoup(
@@ -22,7 +22,7 @@ test_recoup <- function() {
         binParams=list(flankBinSize=50,regionBinSize=150),
         orderBy=list(what="hc1"),
         selector=NULL,
-        rc=0.5
+        rc=0.1
     )
     
     checkTrue(is.list(test.tss))

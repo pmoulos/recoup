@@ -6,7 +6,7 @@
     recoup(
         input,
         design = NULL,
-        region = c("genebody", "tss", "tes", "custom"),
+        region = c("genebody", "tss", "tes", "utr3", "custom"),
         type = c("chipseq", "rnaseq"),
         signal = c("coverage", "rpm"),
         genome = c("hg18", "hg19", "hg38", "mm9" ,"mm10",
@@ -134,7 +134,8 @@
         ),
         bamParams = NULL,
         onTheFly = FALSE,
-        localDbHome = file.path(path.expand("~"), ".recoup"), 
+        localDb = file.path(system.file(package = "recoup"),
+            "annotation.sqlite"),
         rc = NULL
     )
 }
@@ -531,9 +532,8 @@
     becomes less reusable but the memory footprint is 
     lower. Defaults to \code{FALSE}.}
     
-    \item{localDbHome}{local path to retrieve annotation 
-    from when \code{genome} is one of the supported 
-    organisms. See also \code{\link{buildAnnotationStore}}.}
+    \item{localDb}{local path with the annotation database.
+    See also \code{\link{buildAnnotationDatabase}}.}
     
     \item{rc}{fraction (0-1) of cores to use in a multicore 
     system. It defaults to \code{NULL} (no parallelization).}
@@ -951,7 +951,7 @@ test.tss <- recoup(
     genome=test.genome,
     flank=c(2000,2000),
     selector=NULL,
-    rc=0.5
+    rc=0.1
 )
 \donttest{
 # Genebody low resolution profile with 2-factor design, 
@@ -966,7 +966,7 @@ test.gb <- recoup(
     binParams=list(flankBinSize=50,regionBinSize=150),
     orderBy=list(what="hc1"),
     selector=NULL,
-    rc=0.5
+    rc=0.1
 )
 }}
 \author{

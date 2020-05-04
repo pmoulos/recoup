@@ -14,18 +14,23 @@ Imports:
     BiocGenerics,
     biomaRt,
     circlize,
+    GenomeInfoDb,
+    GenomicFeatures,
     graphics,
     grDevices,
+    httr,
+    impute,
     methods,
+    parallel,
     RSQLite,
+    Rsamtools,
     rtracklayer,
     S4Vectors,
     stats,
+    stringr,
     utils
 Suggests:
     grid,
-    GenomeInfoDb,
-    Rsamtools,
     BiocStyle,
     knitr,
     rmarkdown,
@@ -34,7 +39,6 @@ Suggests:
     BiocManager,
     BSgenome,
     RMySQL
-Enhances: parallel
 Description: recoup calculates and plots signal profiles
     created from short sequence reads derived from Next
     Generation Sequencing technologies. The profiles
@@ -49,13 +53,14 @@ Encoding: UTF-8
 LazyLoad: yes
 LazyData: yes
 URL: https://github.com/pmoulos/recoup
-biocViews: ImmunoOncology, Software, GeneExpression, Preprocessing, QualityControl,
-    RNASeq, ChIPSeq, Sequencing, Coverage
+biocViews: ImmunoOncology, Software, GeneExpression, Preprocessing, 
+    QualityControl, RNASeq, ChIPSeq, Sequencing, Coverage, ATACSeq, 
+    ChipOnChip, Alignment, DataImport
 VignetteBuilder: knitr
 Authors@R: c(person(given="Panagiotis", family="Moulos",
     email="moulos@fleming.gr", role=c("aut", "cre")))
-Version: 1.17.0
-Date: 2020-03-04
+Version: 1.17.1
+Date: 2020-05-03
 Collate:
     'annotation.R'
     'argcheck.R'

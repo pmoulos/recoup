@@ -65,7 +65,7 @@ test.tss.1 <- recoup(
     genome=test.genome,
     flank=c(2000,2000),
     selector=NULL,
-    rc=0.5
+    rc=0.1
 )
 
 test.tss.2 <- recoup(
@@ -76,7 +76,7 @@ test.tss.2 <- recoup(
     genome=test.genome,
     flank=c(2000,2000),
     selector=NULL,
-    rc=0.5
+    rc=0.1
 )
 
 test.tss <- mergeRuns(test.tss.1,test.tss.2)

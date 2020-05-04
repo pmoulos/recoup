@@ -47,7 +47,7 @@ test.input <- profileMatrix(
     flank=c(2000,2000),
     binParams=list(flankBinSize=50,regionBinSize=150,
         sumStat="mean",interpolation="auto"),
-    rc=0.5
+    rc=0.1
 )
 }
 \author{

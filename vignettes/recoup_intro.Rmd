@@ -3,7 +3,9 @@ title: "Usage of the recoup package"
 author: "Panagiotis Moulos"
 date: "`r BiocStyle::doc_date()`"
 output: 
-  BiocStyle::html_document
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
 vignette: >
   %\VignetteIndexEntry{Introduction to the recoup package}
   %\VignetteEngine{knitr::rmarkdown}
@@ -129,7 +131,7 @@ The package contains a small dataset which serves only for package building and
 testing purposes as well as complying with Bioconductor guidelines. These data
 are useful for the user to check how the input data to recoup should look like.
 For a more complete test dataset (a small one) have a look and download from
-[here](https://drive.google.com/file/d/0BxxrqIl3Nb0NSVNqdGNPa3M3cnc/view?usp=sharing)
+[here](https://bit.ly/2KTRtwr)
 
 The following commands should provide some information on the embedded test 
 data, which are subsets of the complete test data in the above link.
@@ -143,10 +145,9 @@ help(test.exons)
 
 ## Getting some data
 
-In order to run smoothly some usage examples and produce some realistic results, 
+In order to run smoothly some usage examples and produce some realistic results,
 you need to download a set of example BAM files, genomic regions and design 
-files from 
-[here](https://drive.google.com/file/d/0BxxrqIl3Nb0NSVNqdGNPa3M3cnc/view?usp=sharing).
+files from [here](https://bit.ly/2Wl3z7h).
 Following, a description of each file in the archive (the tissue is always 
 liver):
 
@@ -177,7 +178,7 @@ liver):
 In order to run the vignette examples, you should download and extract the 
 archive to a path of your preference, e.g. `/home/me/recoup_tutorial`.
 
-## Building a local annotation store
+## Building a local annotation database
 
 Apart from a user specified file, the reference genomic regions used by recoup 
 to construct average profiles over, can be predefined gene set from a few common
@@ -188,7 +189,7 @@ of annotation sources (Ensembl, RefSeq and UCSC supported) and a desired path to
 store the annotations (defaults to `/home/me/.recoup`). For example:
 
 ```{r echo=TRUE, eval=FALSE}
-buildAnnotationStore(c("hg19","mm9","rn4"),c("ensembl","refseq"))
+buildAnnotationDatabase(c("hg19","mm9","rn4"),c("ensembl","refseq"))
 ```
 
 See the man page of `buildAnnotationStore` for more details. This step is not
@@ -246,8 +247,8 @@ point, it is not straighforward how to tell the `knitr` vignette builder how to
 plot objects created within called functions.
 
 3. Due to strict Bioconductor guidelines regarding package size, these vignettes
-can also be found in the github package [page](https://github.com/pmoulos/recoup)
-with a little more examples.
+can also be found in the github package 
+[page](https://github.com/pmoulos/recoup) with a few more examples.
 
 ## R session information
 

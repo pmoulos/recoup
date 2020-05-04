@@ -14,17 +14,3 @@
     \item{coverageRnaRef: \code{\link{coverageRef}}}
   }
 }
-\name{recoup-defunct}
-\alias{recoup-defunct}
-\title{Defunct functions in package \sQuote{recoup}}
-
-\description{
-  These functions are defunct and no longer available.
-}
-
-\details{
-  Defunct functions are:
-  \itemize{
-    \item{\code{coverageRef}}
-  }
-}

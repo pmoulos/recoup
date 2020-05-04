@@ -1,5 +1,5 @@
 profileMatrix <- function(input,flank,binParams,rc=NULL) {
-    hasProfile <- sapply(input,function(x) is.null(x$profile))
+    hasProfile <- vapply(input,function(x) is.null(x$profile),logical(1))
     if (!any(hasProfile))
         return(input)
     haveEqualLengths <- covLengthsEqual(input[[1]]$coverage)
@@ -86,7 +86,7 @@ baseCoverageMatrix <- function(cvrg,flank=NULL,
                     }
                 }
             }
-            tmp <- cmclapply(cvrg,contVector,size,NULL,NULL)
+            tmp <- cmclapply(cvrg,contVector,size,NULL,NULL,rc=rc)
         }
         else {
             tmpc <- vector("list",length(chunks))
@@ -102,7 +102,7 @@ baseCoverageMatrix <- function(cvrg,flank=NULL,
                         }
                     }
                 }
-                tmpc[[n]] <- cmclapply(cvrgc,contVector,size,NULL,NULL)
+                tmpc[[n]] <- cmclapply(cvrgc,contVector,size,NULL,NULL,rc=rc)
             }
             tmp <- do.call("c",tmpc)
         }
@@ -115,7 +115,7 @@ baseCoverageMatrix <- function(cvrg,flank=NULL,
             names(tmpc) <- names(chunks)
             for (n in names(chunks)) {
                 cvrgc <- cvrg[chunks[[n]]]
-                tmpc[[n]] <- cmclapply(cvrgc,contVector,NULL,flank,where)
+                tmpc[[n]] <- cmclapply(cvrgc,contVector,NULL,flank,where,rc=rc)
             }
             tmp <- do.call("c",tmpc)
         }
@@ -147,6 +147,27 @@ binCoverageMatrix <- function(cvrg,binSize=1000,stat=c("mean","median"),
     }
     statMatrix <- do.call("rbind",cmclapply(tmp,function(x) unlist(x)))
     return(statMatrix)
+}
+
+imputeProfile <- function(input,rc=NULL) {
+    hasMissing <- vapply(input,function(x) any(is.na(x$profile)),logical(1))
+    if (!any(hasMissing))
+        return(input)
+    
+    if (!requireNamespace("impute"))
+        stop("R package impute is required to perform the imputation!")
+    
+    ii <- which(hasMissing)
+    mn <- vapply(input[ii],function(x) x$name,character(1))
+    message("Missing values detected in profiles of ",paste0(mn,collapse=", "),
+        "! Imputing...")
+    for (n in names(ii)) {
+        message("Imputing missing values for ",input[[n]]$name)
+        # NaNs are extremely rare and sparse, so few neighbors
+        tmp <- impute.knn(input[[n]]$profile,k=3)
+        input[[n]]$profile <- tmp$data
+    }
+    return(input)
 }
 
 ################################################################################
@@ -197,7 +218,7 @@ baseCoverageMatrixOld <- function(cvrg,flank=NULL,
             }
             tmp <- do.call("c",tmpc)
         }
-        null <- which(sapply(tmp,is.null))
+        null <- which(vapply(tmp,is.null,logical(1)))
         if (length(null)>0) {
             for (j in null) {
                 fill <- rep(0,size)
@@ -265,7 +286,7 @@ baseCoverageMatrixOld <- function(cvrg,flank=NULL,
             }
             tmp <- do.call("c",tmpc)
         }
-        null <- which(sapply(tmp,is.null))
+        null <- which(vapply(tmp,is.null,logical(1)))
         if (length(null)>0) {
             for (j in null) {
                 fill <- rep(0,size)
@@ -276,168 +297,170 @@ baseCoverageMatrixOld <- function(cvrg,flank=NULL,
     return(do.call("rbind",tmp))
 }
 
+
+
 ################################################################################
 
 # Legacy functions
 
-binCoverageMatrixOld <- function(cvrg,binSize=1000,stat=c("mean","median"),
-    interpolation=c("auto","spline","linear","neighborhood"),flank=NULL,
-    where=c("center","upstream","downstream"),chunks=NULL,rc=NULL) {
-    stat <- stat[1]
-    interpolation=interpolation[1]
-    if (is.null(flank)) {
-        if (is.null(chunks)) {
-            tmp <- cmclapply(cvrg,function(x) {
-                if (is(x,"Rle") && !is.na(runValue(x)))
-                    return(as.numeric(x))
-                else
-                    return(NULL)
-            },rc=rc)
-        }
-        else {
-            tmpc <- vector("list",length(chunks))
-            names(tmpc) <- names(chunks)
-            for (n in names(chunks)) {
-                message("    processing chunk ",n)
-                tmpc[[n]] <- cmclapply(cvrg[chunks[[n]]],function(x) {
-                    if (is(x,"Rle") && !is.na(runValue(x)))
-                        return(as.numeric(x))
-                    else
-                        return(NULL)
-                },rc=rc)
-            }
-            tmp <- do.call("c",tmpc)
-            names(tmp) <- names(cvrg)
-        }
-    }
-    else {
-        if (is.null(chunks)) {
-            nr <- lengths(cvrg)
-            switch(where,
-                center = {
-                    tmp <- cmclapply(1:length(cvrg),function(i,cvrg,flank,nr) {
-                        if (is(cvrg[[i]],"Rle") 
-                            && !is.na(runValue(cvrg[[i]]))) {
-                            return(
-                                as.numeric(
-                                    cvrg[[i]][(flank[1]+1):(nr[i]-flank[2])])
-                            )
-                        }
-                        else
-                            return(NULL)
-                    },cvrg,flank,nr,rc=rc)
-                },
-                upstream = {
-                    tmp <- cmclapply(1:length(cvrg),function(i,cvrg,flank) {
-                        if (is(cvrg[[i]],"Rle") 
-                            && !is.na(runValue(cvrg[[i]]))) {
-                            return(as.numeric(cvrg[[i]][1:flank[1]]))
-                        }
-                        else
-                            return(NULL)
-                    },cvrg,flank,rc=rc)
-                },
-                downstream = {
-                    tmp <- cmclapply(1:length(cvrg),function(i,cvrg,flank,nr) {
-                        if (is(cvrg[[i]],"Rle") 
-                            && !is.na(runValue(cvrg[[i]]))) {
-                            return(as.numeric(
-                                cvrg[[i]][(nr[i]-flank[2]+1):nr[i]]))
-                        }
-                        else
-                            return(NULL)
-                    },cvrg,flank,nr,rc=rc)
-                }
-            )
-        }
-        else {
-            tmpc <- vector("list",length(chunks))
-            names(tmpc) <- names(chunks)
-            for (n in names(chunks)) {
-                message("    processing chunk ",n)
-                cvrgc <- cvrg[chunks[[n]]]
-                nr <- lengths(cvrgc)
-                switch(where,
-                    center = {
-                        tmpc[[n]] <- 
-                            cmclapply(1:length(cvrgc),
-                            function(i,cvrgc,flank,nr) {
-                            if (is(cvrgc[[i]],"Rle") 
-                                && !is.na(runValue(cvrgc[[i]]))) {
-                                return(
-                                    as.numeric(cvrgc[[i]][
-                                        (flank[1]+1):(nr[i]-flank[2])])
-                                )
-                            }
-                            else
-                                return(NULL)
-                        },cvrgc,flank,nr,rc=rc)
-                    },
-                    upstream = {
-                        tmpc[[n]] <- 
-                            cmclapply(1:length(cvrgc),function(i,cvrgc,flank) {
-                            if (is(cvrgc[[i]],"Rle") 
-                                && !is.na(runValue(cvrgc[[i]]))) {
-                                return(as.numeric(cvrgc[[i]][1:flank[1]]))
-                            }
-                            else
-                                return(NULL)
-                        },cvrgc,flank,rc=rc)
-                    },
-                    downstream = {
-                        tmpc[[n]] <- 
-                            cmclapply(1:length(cvrgc),
-                            function(i,cvrgc,flank,nr) {
-                            if (is(cvrgc[[i]],"Rle") 
-                                && !is.na(runValue(cvrgc[[i]]))) {
-                                return(as.numeric(
-                                    cvrgc[[i]][(nr[i]-flank[2]+1):nr[i]]))
-                            }
-                            else
-                                return(NULL)
-                        },cvrgc,flank,nr,rc=rc)
-                    }
-                )
-            }
-            tmp <- do.call("c",tmpc)
-            names(tmp) <- names(cvrg)
-        }
-    }
-    null <- which(sapply(tmp,is.null))
-    if (length(null)>0) {
-        for (j in null) {
-            fill <- rep(0,binSize)
-            tmp[[j]] <- fill
-        }
-    }
-    if (is.null(chunks))
-        tmp <- cmclapply(tmp,function(x) splitVector(x,binSize,
-            interpolation,stat),rc=rc)
-    else {
-        tmpc <- vector("list",length(chunks))
-        names(tmpc) <- names(chunks)
-        for (n in names(chunks)) {
-            message("    processing chunk ",n)
-            y <- tmp[chunks[[n]]]
-            tryCatch({
-            tmpc[[n]] <- 
-                cmclapply(y,function(x) splitVector(x,binSize,interpolation,
-                    stat),rc=rc)
-            },error=function(e) print(e),finally="")
-        }
-        tmp <- do.call("c",tmpc)
-        names(tmp) <- names(cvrg)
-    }
-    ############################################################################
-    # Good try but took too much time...
-    #tmp <- cmclapply(cvrg,function(x) {
-    #    if (is.null(x))
-    #         x <- Rle(rep(0,binSize))
-    #    splitVector(x,binSize,interpolation)
-    #},rc=rc)
-    ############################################################################
-    statMatrix <- do.call("rbind",cmclapply(tmp,function(x) unlist(x)))
-    #statMatrix <- do.call("rbind",cmclapply(tmp,function(x) 
-    #    unlist(lapply(x,stat)),rc=rc))
-    return(statMatrix)
-}
+#binCoverageMatrixOld <- function(cvrg,binSize=1000,stat=c("mean","median"),
+#    interpolation=c("auto","spline","linear","neighborhood"),flank=NULL,
+#    where=c("center","upstream","downstream"),chunks=NULL,rc=NULL) {
+#    stat <- stat[1]
+#    interpolation=interpolation[1]
+#    if (is.null(flank)) {
+#        if (is.null(chunks)) {
+#            tmp <- cmclapply(cvrg,function(x) {
+#                if (is(x,"Rle") && !is.na(runValue(x)))
+#                    return(as.numeric(x))
+#                else
+#                    return(NULL)
+#            },rc=rc)
+#        }
+#        else {
+#            tmpc <- vector("list",length(chunks))
+#            names(tmpc) <- names(chunks)
+#            for (n in names(chunks)) {
+#                message("    processing chunk ",n)
+#                tmpc[[n]] <- cmclapply(cvrg[chunks[[n]]],function(x) {
+#                    if (is(x,"Rle") && !is.na(runValue(x)))
+#                        return(as.numeric(x))
+#                    else
+#                        return(NULL)
+#                },rc=rc)
+#            }
+#            tmp <- do.call("c",tmpc)
+#            names(tmp) <- names(cvrg)
+#        }
+#    }
+#    else {
+#        if (is.null(chunks)) {
+#            nr <- lengths(cvrg)
+#            switch(where,
+#                center = {
+#                    tmp <- cmclapply(1:length(cvrg),function(i,cvrg,flank,nr) {
+#                        if (is(cvrg[[i]],"Rle") 
+#                            && !is.na(runValue(cvrg[[i]]))) {
+#                            return(
+#                                as.numeric(
+#                                    cvrg[[i]][(flank[1]+1):(nr[i]-flank[2])])
+#                            )
+#                        }
+#                        else
+#                            return(NULL)
+#                    },cvrg,flank,nr,rc=rc)
+#                },
+#                upstream = {
+#                    tmp <- cmclapply(1:length(cvrg),function(i,cvrg,flank) {
+#                        if (is(cvrg[[i]],"Rle") 
+#                            && !is.na(runValue(cvrg[[i]]))) {
+#                            return(as.numeric(cvrg[[i]][1:flank[1]]))
+#                        }
+#                        else
+#                            return(NULL)
+#                    },cvrg,flank,rc=rc)
+#                },
+#                downstream = {
+#                    tmp <- cmclapply(1:length(cvrg),function(i,cvrg,flank,nr) {
+#                        if (is(cvrg[[i]],"Rle") 
+#                            && !is.na(runValue(cvrg[[i]]))) {
+#                            return(as.numeric(
+#                                cvrg[[i]][(nr[i]-flank[2]+1):nr[i]]))
+#                        }
+#                        else
+#                            return(NULL)
+#                    },cvrg,flank,nr,rc=rc)
+#                }
+#            )
+#        }
+#        else {
+#            tmpc <- vector("list",length(chunks))
+#            names(tmpc) <- names(chunks)
+#            for (n in names(chunks)) {
+#                message("    processing chunk ",n)
+#                cvrgc <- cvrg[chunks[[n]]]
+#                nr <- lengths(cvrgc)
+#                switch(where,
+#                    center = {
+#                        tmpc[[n]] <- 
+#                            cmclapply(1:length(cvrgc),
+#                            function(i,cvrgc,flank,nr) {
+#                            if (is(cvrgc[[i]],"Rle") 
+#                                && !is.na(runValue(cvrgc[[i]]))) {
+#                                return(
+#                                    as.numeric(cvrgc[[i]][
+#                                        (flank[1]+1):(nr[i]-flank[2])])
+#                                )
+#                            }
+#                            else
+#                                return(NULL)
+#                        },cvrgc,flank,nr,rc=rc)
+#                    },
+#                    upstream = {
+#                        tmpc[[n]] <- 
+#                            cmclapply(1:length(cvrgc),function(i,cvrgc,flank) {
+#                            if (is(cvrgc[[i]],"Rle") 
+#                                && !is.na(runValue(cvrgc[[i]]))) {
+#                                return(as.numeric(cvrgc[[i]][1:flank[1]]))
+#                            }
+#                            else
+#                                return(NULL)
+#                        },cvrgc,flank,rc=rc)
+#                    },
+#                    downstream = {
+#                        tmpc[[n]] <- 
+#                            cmclapply(1:length(cvrgc),
+#                            function(i,cvrgc,flank,nr) {
+#                            if (is(cvrgc[[i]],"Rle") 
+#                                && !is.na(runValue(cvrgc[[i]]))) {
+#                                return(as.numeric(
+#                                    cvrgc[[i]][(nr[i]-flank[2]+1):nr[i]]))
+#                            }
+#                            else
+#                                return(NULL)
+#                        },cvrgc,flank,nr,rc=rc)
+#                    }
+#                )
+#            }
+#            tmp <- do.call("c",tmpc)
+#            names(tmp) <- names(cvrg)
+#        }
+#    }
+#    null <- which(sapply(tmp,is.null))
+#    if (length(null)>0) {
+#        for (j in null) {
+#            fill <- rep(0,binSize)
+#            tmp[[j]] <- fill
+#        }
+#    }
+#    if (is.null(chunks))
+#        tmp <- cmclapply(tmp,function(x) splitVector(x,binSize,
+#            interpolation,stat),rc=rc)
+#    else {
+#        tmpc <- vector("list",length(chunks))
+#        names(tmpc) <- names(chunks)
+#        for (n in names(chunks)) {
+#            message("    processing chunk ",n)
+#            y <- tmp[chunks[[n]]]
+#            tryCatch({
+#            tmpc[[n]] <- 
+#                cmclapply(y,function(x) splitVector(x,binSize,interpolation,
+#                    stat),rc=rc)
+#            },error=function(e) print(e),finally="")
+#        }
+#        tmp <- do.call("c",tmpc)
+#        names(tmp) <- names(cvrg)
+#    }
+#    ###########################################################################
+#    # Good try but took too much time...
+#    #tmp <- cmclapply(cvrg,function(x) {
+#    #    if (is.null(x))
+#    #         x <- Rle(rep(0,binSize))
+#    #    splitVector(x,binSize,interpolation)
+#    #},rc=rc)
+#    ###########################################################################
+#    statMatrix <- do.call("rbind",cmclapply(tmp,function(x) unlist(x)))
+#    #statMatrix <- do.call("rbind",cmclapply(tmp,function(x) 
+#    #    unlist(lapply(x,stat)),rc=rc))
+#    return(statMatrix)
+#}

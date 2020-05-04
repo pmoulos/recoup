@@ -1,6 +1,6 @@
 rpMatrix <- function(input,mainRanges,flank,binParams,
     strandedParams=list(strand=NULL,ignoreStrand=TRUE),rc=NULL) {
-    hasProfile <- sapply(input,function(x) is.null(x$profile))
+    hasProfile <- vapply(input,function(x) is.null(x$profile),logical(1))
     if (!any(hasProfile))
         return(input)
     
@@ -68,7 +68,7 @@ rpMatrix <- function(input,mainRanges,flank,binParams,
         }
         
         # The calculate the profiles
-        names(input) <- sapply(input,function(x) return(x$id))
+        names(input) <- vapply(input,function(x) return(x$id),character(1))
         for (n in names(input)) {
             message("Calculating requested regions rpm for ",input[[n]]$name)
             if (!is.null(input[[n]]$ranges)) {
@@ -121,7 +121,7 @@ rpMatrix <- function(input,mainRanges,flank,binParams,
                 where="center",rc=rc)
                 
         # The calculate the profiles
-        names(input) <- sapply(input,function(x) return(x$id))
+        names(input) <- vapply(input,function(x) return(x$id),character(1))
         for (n in names(input)) {
             message("Calculating requested regions for ",input[[n]]$name)
             if (!is.null(input[[n]]$ranges))

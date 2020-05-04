@@ -59,7 +59,7 @@ test.tss <- recoup(
     selector=NULL,
     plotParams=list(plot=FALSE,profile=TRUE,
         heatmap=TRUE,device="x11"),
-    rc=0.5
+    rc=0.1
 )
 
 # Plot coverage profiles

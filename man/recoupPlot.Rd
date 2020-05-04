@@ -5,8 +5,9 @@
     recoupPlot(recoupObj, what = c("profile", "heatmap", 
         "correlation"), device = c("x11", "png", "jpg", "tiff", 
         "bmp", "pdf", "ps"), outputDir = ".",
-        outputBase = paste(sapply(recoupObj, function(x) 
-            return(x$data$id)), sep = "_"), mainh = 1, ...)
+        outputBase = paste(vapply(recoupObj,
+        function(x) return(x$data$id), character(1)), 
+        sep = "_"), mainh = 1, ...)
 }
 \arguments{
     \item{recoupObj}{a list object created from 
@@ -64,7 +65,7 @@ test.tss <- recoup(
     selector=NULL,
     plotParams=list(plot=FALSE,profile=TRUE,
         heatmap=TRUE,device="x11"),
-    rc=0.5
+    rc=0.1
 )
 
 # Plot coverage profiles

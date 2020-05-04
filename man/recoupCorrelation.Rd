@@ -44,11 +44,11 @@ test.tss <- recoup(
     selector=NULL,
     plotParams=list(profile=FALSE,correlation=TRUE,
         heatmap=FALSE),
-    rc=0.5
+    rc=0.1
 )
 
 # Plot coverage correlations
-recoupCorrelation(test.tss,rc=0.5)
+recoupCorrelation(test.tss,rc=0.1)
 }
 \author{
     Panagiotis Moulos

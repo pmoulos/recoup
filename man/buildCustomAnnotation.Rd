@@ -94,7 +94,7 @@ buildCustomAnnotation(
 
 # Try to retrieve some data
 myGenes <- loadAnnotation(genome="dummy",refdb="dummy_db",
-  level="gene",type="gene",db=myDb)
+  type="gene",db=myDb)
 myGenes
 
 ## Real data!

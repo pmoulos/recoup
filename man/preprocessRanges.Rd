@@ -3,7 +3,7 @@
 \title{Read and preprocess BAM/BED files to GRanges}
 \usage{
     preprocessRanges(input, preprocessParams, genome, 
-		bamRanges=NULL, bamParams = NULL, rc = NULL)
+        bamRanges=NULL, bamParams = NULL, rc = NULL)
 }
 \arguments{
     \item{input}{an input list as in \code{\link{recoup}} but

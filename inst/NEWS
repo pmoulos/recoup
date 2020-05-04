@@ -115,3 +115,19 @@ NEW FEATURES
 BUG FIXES
     o Fixed a bug resulting in profile bleeding when using a mask of ranges
     from a BAM file.
+    
+
+CHANGES IN VERSION 1.17.1 (2020-05-03)
+-------------------------------------
+
+NEW FEATURES
+
+    o New annotation based on an SQLite database. Rebuild must be performed
+    otherwise the application will break. Download of a ready made annotation
+    is also available (see vignette).
+    o More supported genomes
+    o Quick, high-level profile based on RPM instead of coverage
+    o Speed and code improvements
+BUG FIXES
+    o Fixed bug resulting in running the same operation multiple times when
+    chunking was requested.

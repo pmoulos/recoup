@@ -212,7 +212,7 @@ recoup <- function(
         # members are checked by buildCustomAnnotation if required
         # We only need to check that the gtfFile exists here
         if (!("gtf" %in% names(genome)))
-            stopp("A gtf field must be provided with an existing GTF file ",
+            stop("A gtf field must be provided with an existing GTF file ",
                 "when providing a list with custom annotation elements!")
         if ("gtf" %in% names(genome) && is.character(genome$gtf)
             && !file.exists(genome$gtf))
@@ -479,8 +479,8 @@ recoup <- function(
                     type="gene",version=version,db=localDb,rc=rc),
                     error=function(e) {
                         tryCatch({
-                            gtfFile <- annotation$gtf
-                            metadata <- annotation
+                            gtfFile <- genome$gtf
+                            metadata <- genome
                             metadata$gtf <- NULL
                             geneData <- importCustomAnnotation(gtfFile,
                                 metadata,"gene")
@@ -748,6 +748,11 @@ recoup <- function(
         }
         input <- profileMatrix(input,flank,binParams,rc)
     }
+    
+    # In some strange glimpses, we are getting very few NaNs in profile matrix
+    # which I was unable to reproduce on a gene by gene basis. If no NaNs are
+    # detected, no action is performed in the input object.
+    input <- imputeProfile(input,rc)
     
     # Perform the k-means clustering if requested and append to design (which
     # has been checked, if we are allowed to do so)

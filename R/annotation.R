@@ -297,8 +297,7 @@ buildCustomAnnotation <- function(gtfFile,metadata,
     else {
         message("Retrieving gene annotation for ",o," from ",s," version ",v,
             " from ",gtfFile)
-        ann <- annotationFromCustomGtf(parsed,level="gene",type="gene",
-            asdf=TRUE)
+        ann <- annotationFromCustomGtf(parsed,type="gene",asdf=TRUE)
         nr <- .dropAnnotation(con,o,s,v,"gene")
         nr <- .insertContent(con,o,s,v,"gene",1)
         nid <- .annotationExists(con,o,s,v,"gene",out="id")
@@ -316,7 +315,7 @@ buildCustomAnnotation <- function(gtfFile,metadata,
             "recreate it choose rewrite = TRUE.")
     else {
         message("Retrieving 3' UTR annotation for ",o," from ",s," version ",v)
-        ann <- annotationFromCustomGtf(parsed,level="gene",type="utr",asdf=TRUE)
+        ann <- annotationFromCustomGtf(parsed,type="utr",asdf=TRUE)
         if (nrow(ann) > 0) {
             nr <- .dropAnnotation(con,o,s,v,"utr")
             nr <- .insertContent(con,o,s,v,"utr",1)
@@ -340,8 +339,8 @@ buildCustomAnnotation <- function(gtfFile,metadata,
     else {
         message("Retrieving summarized 3' UTR annotation per gene for ",o,
             " from ",s," version ",v)
-        ann <- annotationFromCustomGtf(parsed,level="gene",type="utr",
-            summarized=TRUE,asdf=TRUE)
+        ann <- annotationFromCustomGtf(parsed,type="utr",summarized=TRUE,
+            asdf=TRUE)
         
         if (nrow(ann) > 0) {
             activeLength <- attr(ann,"activeLength")
@@ -378,8 +377,7 @@ buildCustomAnnotation <- function(gtfFile,metadata,
             "recreate it choose rewrite = TRUE.")
     else {
         message("Retrieving exon annotation for ",o," from ",s," version ",v)
-        ann <- annotationFromCustomGtf(parsed,level="exon",type="exon",
-            asdf=TRUE)
+        ann <- annotationFromCustomGtf(parsed,type="exon",asdf=TRUE)
         nr <- .dropAnnotation(con,o,s,v,"exon")
         nr <- .insertContent(con,o,s,v,"exon",1)
         nid <- .annotationExists(con,o,s,v,"exon",out="id")
@@ -398,8 +396,8 @@ buildCustomAnnotation <- function(gtfFile,metadata,
     else {
         message("Retrieving summarized exon annotation for ",o," from ",s,
             " version ",v)
-        ann <- annotationFromCustomGtf(parsed,level="gene",type="exon",
-            summarized=TRUE,asdf=TRUE)
+        ann <- annotationFromCustomGtf(parsed,type="exon",summarized=TRUE,
+            asdf=TRUE)
         activeLength <- attr(ann,"activeLength")
         
         nr <- .dropAnnotation(con,o,s,v,"summarized_exon")
@@ -875,7 +873,7 @@ reduceTranscripts <- function(gr) {
     # again per gene_id in a temp variable
     tmp <- split(grNew,grNew$gene_id)
     tmp <- tmp[gene]
-    len <- sapply(width(tmp),sum)
+    len <- vapply(width(tmp),sum,integer(1))
     
     #return(grNew)
     return(list(model=grNew,length=len))
@@ -933,7 +931,7 @@ reduceTranscriptsUtr <- function(gr) {
     # again per gene_id in a temp variable
     tmp <- split(grNew,grNew$gene_id)
     tmp <- tmp[trans]
-    len <- sapply(width(tmp),sum)
+    len <- vapply(width(tmp),sum,integer(1))
     
     #return(grNew)
     return(list(model=grNew,length=len))
@@ -992,7 +990,7 @@ reduceExons <- function(gr) {
     # again per gene_id in a temp variable
     tmp <- split(grNew,grNew$gene_id)
     tmp <- tmp[gene]
-    len <- sapply(width(tmp),sum)
+    len <- vapply(width(tmp),sum,integer(1))
     
     return(list(model=grNew,length=len))
 }

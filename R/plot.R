@@ -1,7 +1,7 @@
 recoupPlot <- function(recoupObj,what=c("profile","heatmap","correlation"),
     device=c("x11","png","jpg","tiff","bmp","pdf","ps"),outputDir=".",
-    outputBase=paste(sapply(recoupObj,function(x) return(x$data$id)),sep="_"),
-    mainh=1,...) {
+    outputBase=paste(vapply(recoupObj,function(x) return(x$data$id),
+    character(1)),sep="_"),mainh=1,...) {
     what <- tolower(what)
     device <- tolower(device[1])
     checkTextArgs("what",what,c("profile","heatmap","correlation"),
@@ -138,9 +138,10 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
             input <- input[samples]
     }
     
-    profileColors <- unlist(sapply(input,function(x) return(x$color)))
+    profileColors <- vapply(input,function(x) return(x$color),character(1))
     if (!is.null(profileColors))
-        names(profileColors) <- unlist(sapply(input,function(x) return(x$name)))
+        names(profileColors) <- 
+            vapply(input,function(x) return(x$name),character(1))
     
     ggParams <- opts$ggplotParams
     
@@ -148,7 +149,7 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
         # Create ggplot data
         profiles <- calcPlotProfiles(input,opts,2,rc)
         index <- 1:length(profiles[[1]][[1]])
-        names <- sapply(input,function(x) return(x$name))
+        names <- vapply(input,function(x) return(x$name),character(1))
         position <- rep(index,length(input))
         signal <- unlist(lapply(profiles,function(x) return(x$profile)))
         ymin <- unlist(lapply(profiles,function(x) return(x$lower)))
@@ -210,7 +211,7 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
             d <- names(x) # Should be the "|" separated factor names
             dsplit <- strsplit(d,split="|",fixed=TRUE)
             # Replication factors
-            pop <- sapply(x,function(x) return(length(x$profile)))
+            pop <- vapply(x,function(x) return(length(x$profile)),integer(1))
             tmp <- vector("list",length(x))
             for (i in 1:length(dsplit)) {
                 if (length(dsplit[[i]])>1)
@@ -233,7 +234,7 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
         })
         
         index <- 1:ncol(input[[1]]$profile)
-        names <- sapply(input,function(x) return(x$name))
+        names <- vapply(input,function(x) return(x$name),character(1))
         faceter <- do.call("rbind",lapply(designProfiles,function(x) 
                 return(x$design)))
         m <- length(which(!duplicated(faceter)))
@@ -507,7 +508,7 @@ recoupHeatmap <- function(recoupObj,samples=NULL,rc=NULL) {
     
     colorFuns <- vector("list",length(input))
     names(colorFuns) <- names(input)
-    profileColors <- unlist(sapply(input,function(x) return(x$color)))
+    profileColors <- vapply(input,function(x) return(x$color),character(1))
     if (opts$plotParams$heatmapScale=="each") {
         for (n in names(colorFuns)) {
             qs <- c(0.95,0.96,0.97,0.98,0.99,0.995,0.999)
@@ -528,9 +529,9 @@ recoupHeatmap <- function(recoupObj,samples=NULL,rc=NULL) {
         }
     }
     else if (opts$plotParams$heatmapScale=="common") {
-        sups <- unlist(sapply(input,function(x) {
+        sups <- vapply(input,function(x) {
             return(quantile(x$profile,0.95))
-        }))
+        },numeric(1))
         sup <- max(sups)
         supp <- opts$plotParams$heatmapFactor * sup
         for (n in names(colorFuns)) {
@@ -656,9 +657,10 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
             input[[n]]$profile <- input[[n]]$profile/max(input[[n]]$profile)
     }
     
-    profileColors <- unlist(sapply(input,function(x) return(x$color)))
+    profileColors <- vapply(input,function(x) return(x$color),character(1))
     if (!is.null(profileColors))
-        names(profileColors) <- unlist(sapply(input,function(x) return(x$name)))
+        names(profileColors) <- 
+            vapply(input,function(x) return(x$name),character(1))
     
     ggParams <- opts$ggplotParams
     
@@ -667,7 +669,7 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
         profiles <- calcPlotProfiles(input,opts,1,rc)
         sorter <- orderSignals(profiles,opts)
         index <- 1:length(profiles[[1]][[1]])
-        names <- sapply(input,function(x) return(x$name))
+        names <- vapply(input,function(x) return(x$name),character(1))
         position <- rep(index,length(input))
         signal <- unlist(lapply(profiles,function(x,s,p) {
             return(lowess(x$profile[s],f=p)$y)
@@ -737,7 +739,7 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
             d <- names(x) # Should be the "|" separated factor names
             dsplit <- strsplit(d,split="|",fixed=TRUE)
             # Replication factors
-            pop <- sapply(x,function(x) return(length(x$profile)))
+            pop <- vapply(x,function(x) return(length(x$profile)),integer(1))
             tmp <- vector("list",length(x))
             for (i in 1:length(dsplit)) {
                 if (length(dsplit[[i]])>1)
@@ -766,15 +768,15 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
         })
         
         sorter <- orderDesignSignals(designProfiles,design,opts)
-        names <- sapply(input,function(x) return(x$name))
+        names <- vapply(input,function(x) return(x$name),character(1))
         faceter <- do.call("rbind",lapply(designProfiles,function(x) 
                 return(x$design)))
         position <- unlist(lapply(subProfiles,function(x) {
             return(unlist(lapply(x,function(y) return(1:length(y$profile)))))
         }))
-        condition <- rep(names,sapply(designProfiles,function(x) {
+        condition <- rep(names,vapply(designProfiles,function(x) {
             return(length(x$profile))
-        }))
+        },integer(1)))
         signal <- unlist(lapply(designProfiles,function(x,s,p) {
             #return(lowess(x$profile[s],f=0.05)$y),sorter),
             if (any(is.na(x$lower[s])) || length(x$profile[s])<4)

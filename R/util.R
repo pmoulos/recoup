@@ -146,7 +146,7 @@ covLengthsEqual <- function(rl) {
     else if (is(rl,"GRanges"))
         len <- width(rl)
     else if (is(rl,"GRangesList"))
-        len <- sapply(width(rl),sum)
+        len <- vapply(width(rl),sum,integer(1))
     z <- which(len==1)
     if (length(z)>0)
         len <- len[-z]
@@ -220,7 +220,7 @@ kmeansDesign <- function(input,design=NULL,kmParams) {
     }
     if (!is.null(input$data)) # Fed with recoup object
         input <- input$data
-    hasProfile <- sapply(input,function(x) is.null(x$profile))
+    hasProfile <- vapply(input,function(x) is.null(x$profile),logical(1))
     if (any(hasProfile))
         stop("Profile matrices for k-means clustering are missing from the ",
             "input object. Have you called the profileMatrix function?")
@@ -289,7 +289,7 @@ reorderClusters <- function(design,newOrder) {
     cur <- as.character(design$kcluster)
     # They are of the form Cluster X (YYY)
     spl <- strsplit(cur," ")
-    num <- as.numeric(sapply(spl,function(x) return(x[2])))
+    num <- as.numeric(vapply(spl,function(x) return(x[2]),character(1)))
     
     # Before going furher, check that newOrder contains the same clusters
     unum <- unique(num)
@@ -299,7 +299,7 @@ reorderClusters <- function(design,newOrder) {
             setdiff(newOrder,unum)," not found in design.")
     
     # Proceed
-    car <- sapply(spl,function(x) return(x[3]))
+    car <- vapply(spl,function(x) return(x[3]),character(1))
     
     names(newOrder) <- 1:length(newOrder)
     
@@ -431,8 +431,9 @@ mergeRuns <- function(...,withDesign=c("auto","drop"),dropPlots=TRUE) {
     
     # Check design
     if (withDesign == "auto") {
-        allHaveDesign <- all(sapply(tmp,function(x) !is.null(x$design)))
-        whichDesign <- sapply(tmp,function(x) is.null(x$design))
+        allHaveDesign <- 
+            all(vapply(tmp,function(x) !is.null(x$design),logical(1)))
+        whichDesign <- vapply(tmp,function(x) is.null(x$design),logical(1))
         oneHasDesign <- ifelse(length(which(!whichDesign))==1,TRUE,FALSE)
         noneHasDesign <- all(whichDesign)
         if (noneHasDesign)
@@ -521,7 +522,7 @@ mergeRuns <- function(...,withDesign=c("auto","drop"),dropPlots=TRUE) {
     merged$callopts <- tmp[[1]]$callopts
     
     # Try to merge actual data
-    newLen <- sum(sapply(tmp,function(x) return(length(x$data))))
+    newLen <- sum(vapply(tmp,function(x) return(length(x$data)),integer(1)))
     merged$data <- vector("list",newLen)
     theNames <- character(0)
     for (i in 1:length(tmp))
@@ -597,11 +598,11 @@ removeData <- function(input,type=c("ranges","coverage","profile")) {
 }
 
 calcLinearFactors <- function(input,preprocessParams) {
-    hasRanges <- sapply(input,function(x) is.null(x$ranges))
+    hasRanges <- vapply(input,function(x) is.null(x$ranges),logical(1))
     if (any(hasRanges))
         stop("Please provide input reads before calculation normalization ",
             "factors")
-    libSizes <- sapply(input,function(x) return(length(x$ranges)))
+    libSizes <- vapply(input,function(x) return(length(x$ranges)),integer(1))
     if (preprocessParams$normalize=="linear" 
         || preprocessParams$normalize=="downsample")
         linFac <- min(libSizes)/libSizes
@@ -735,8 +736,8 @@ getDefaultListArgs <- function(arg,design=NULL,genome=NULL) {
     )
 }
 
-#setr <- function(obj,key=c("design","profile","heatmap","correlation","orderBy",
-#    "kmParams","plotParams"),value) {
+#setr <- function(obj,key=c("design","profile","heatmap","correlation",
+#   "orderBy","kmParams","plotParams"),value) {
 setr <- function(obj,key,value=NULL) {
     if (is.character(key)) { # Property name, property value pairs
         if (is.null(value))
@@ -919,10 +920,10 @@ setArg <- function(arg.list,arg.name,arg.value=NULL) {
 }
 
 areColors <- function(x) {
-    return(sapply(x,function(y) {
+    return(vapply(x,function(y) {
         tryCatch(is.matrix(col2rgb(y)),
             error=function(e) FALSE)
-    }))
+    },logical(1)))
 }
 
 ################################################################################
