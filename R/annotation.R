@@ -57,6 +57,11 @@ buildAnnotationDatabase <- function(organisms,sources,
                     vss <- getUcscToEnsembl(o)
                     vs <- vss[length(vss)]
                 }
+                vs <- .validateEnsemblVersions(o,vs)
+                if (is.null(vs)) { # Something went wrong... Get latest again
+                    vss <- getUcscToEnsembl(o)
+                    vs <- vss[length(vss)]
+                }
             }
             else if (s %in% getSupportedUcscDbs())
                 vs <- format(Sys.Date(),"%Y%m%d")
@@ -1598,8 +1603,20 @@ getHost <- function(org,ver=NULL) {
         else
             return(ea[i,"url"])
     }
-    else
-        return(NULL)
+    else {
+        warning("Version ",ver," not found in biomaRt archives for ",org,"! ",
+            "Will use the latest available version for ",org,"...",
+            immediate.=TRUE)
+        u2e <- ucscToEnsembl()
+        vers <- u2e[[org]]
+        for (v in rev(vers)) {
+            newi <- grep(as.character(v),ea[,"version"])
+            if (length(newi) > 0)
+                return(ea[newi,"url"])
+        }
+    }
+    # If everything fails...
+    return(NULL)
 }
 
 getUcscToEnsembl <- function(org) {
@@ -1633,51 +1650,6 @@ ucscToEnsembl <- function() {
         susscr11=90:99,
         equcab2=c(67,74:99)
     ))
-}
-
-getHostOld <- function(org) {
-    .Deprecated("getHost")
-    switch(org,
-        hg18 = { return("may2009.archive.ensembl.org") },
-        hg19 = { return("grch37.ensembl.org") },
-        hg38 = { return("www.ensembl.org") },
-        mm9 = { return("may2012.archive.ensembl.org") },
-        mm10 = { return("www.ensembl.org") },
-        rn5 = { return("grch37.ensembl.org") },
-        rn6 = { return("www.ensembl.org") },
-        dm3 = { return("grch37.ensembl.org") },
-        dm6 = { return("www.ensembl.org") },
-        danrer7 = { return("grch37.ensembl.org") },
-        danrer10 = { return("www.ensembl.org") },
-        danrer11 = { return("www.ensembl.org") },
-        pantro4 = { return("grch37.ensembl.org") },
-        pantro5 = { return("www.ensembl.org") },
-        #pantro6 = { return("www.ensembl.org") },
-        susscr3 = { return("grch37.ensembl.org") },
-        susscr11 = { return("www.ensembl.org") }
-    )
-}
-
-getAltHost <- function(org) {
-    .Deprecated("getHost")
-    switch(org,
-        hg18 = { return("may2009.archive.ensembl.org") },
-        hg19 = { return("grch37.ensembl.org") },
-        hg38 = { return("uswest.ensembl.org") },
-        mm9 = { return("may2012.archive.ensembl.org") },
-        mm10 = { return("uswest.ensembl.org") },
-        rn5 = { return("uswest.ensembl.org") },
-        dm3 = { return("uswest.ensembl.org") },
-        dm6 = { return("uswest.ensembl.org") },
-        danrer7 = { return("uswest.ensembl.org") },
-        danrer10 = { return("uswest.ensembl.org") },
-        danrer11 = { return("uswest.ensembl.org") },
-        pantro4 = { return("uswest.ensembl.org") },
-        pantro5 = { return("uswest.ensembl.org") },
-        #pantro6 = { return("uswest.ensembl.org") },
-        susscr3 = { return("uswest.ensembl.org") },
-        susscr11 = { return("www.ensembl.org") }
-    )
 }
 
 getDataset <- function(org) {
@@ -1764,9 +1736,7 @@ getValidChrs <- function(org) {
         },
         dm6 = {
             return(c(
-                "chr2L","chr2LHet","chr2R","chr2RHet","chr3L","chr3LHet",
-                "chr3R","chr3RHet","chr4","chrU","chrUextra","chrX","chrXHet",
-                "chrYHet"
+                "chr2L","chr2R","chr3L","chr3R","chr4","chrX"
             ))
         },
         danrer7 = {
@@ -2775,6 +2745,31 @@ initDatabase <- function(db) {
         return(FALSE)
     refdbs <- unique(us$source)
     return(refdb %in% refdbs)
+}
+
+.validateEnsemblVersions <- function(o,v) {
+    ea <- biomaRt::listEnsemblArchives()
+    found <- as.character(v) %in% ea[,"version"]
+    if (any(!found)) {
+        nf <- which(!found)
+        warning("Version(s) ",paste0(v[nf],collapse=", ")," not found in ",
+            "biomaRt archives for current organism!\nWill use the latest ",
+            "available version(s)...",immediate.=TRUE)
+        newv <- v[-nf]
+        if (length(newv) == 0) {
+            warning("No Ensembl versions left after validation! Will return ",
+                "only the latest available...",immediate.=TRUE)
+            u2e <- ucscToEnsembl()
+            vers <- u2e[[o]]
+            for (newv in rev(vers)) {
+                newi <- grep(as.character(newv),ea[,"version"])
+                if (length(newi) > 0)
+                    return(newv)
+            }
+        }
+        return(newv)
+    }
+    return(v)
 }
 
 buildAnnotationStore <- function(organisms,sources,
