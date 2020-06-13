@@ -1,3 +1,10 @@
+<!-- badges: start -->
+  [![Travis build status](https://travis-ci.org/pmoulos/recoup.svg?branch=master)](https://travis-ci.org/pmoulos/recoup)
+  ![GitHub](https://img.shields.io/github/license/pmoulos/recoup)
+  ![GitHub repo size](https://img.shields.io/github/repo-size/pmoulos/recoup)
+  ![GitHub issues](https://img.shields.io/github/issues/pmoulos/recoup)
+<!-- badges: end -->
+
 Genomic coverages remastered! The recoup package.
 ==================================================
 
