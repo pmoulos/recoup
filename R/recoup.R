@@ -415,6 +415,11 @@ recoup <- function(
                 df=genome,
                 keep.extra.columns=TRUE
             )
+            # Need to assigne Seqinfo...
+            sf <- .chromInfoToSeqInfoDf(.chromInfoFromBAM(input[[1]]$file),
+                asSeqinfo=TRUE)
+            seqlevels(genomeRanges) <- seqlevels(sf)
+            seqinfo(genomeRanges) <- sf
         }
         # Annotation case #3: use local database or automatically on-the-fly
         else {
@@ -752,7 +757,7 @@ recoup <- function(
     # In some strange glimpses, we are getting very few NaNs in profile matrix
     # which I was unable to reproduce on a gene by gene basis. If no NaNs are
     # detected, no action is performed in the input object.
-    input <- imputeProfile(input,rc)
+    input <- imputeProfile(input,method="simple",rc)
     
     # Perform the k-means clustering if requested and append to design (which
     # has been checked, if we are allowed to do so)

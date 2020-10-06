@@ -87,6 +87,7 @@ preprocessRanges <- function(input,preprocessParams,genome,bamRanges=NULL,
     
     # With 0 we do nothing
     # With 1, remove unanchored regions, keep chrM
+    #if (is.character(genome)) {
     if (preprocessParams$cleanLevel==1) {
         message("Removing unanchored reads from all samples")
         ranges <- cmclapply(ranges,cleanRanges,1,genome,rc=rc)
@@ -102,6 +103,7 @@ preprocessRanges <- function(input,preprocessParams,genome,bamRanges=NULL,
                 "from all samples")
         ranges <- cmclapply(ranges,cleanRanges,3,genome,rc=rc)
     }
+    #}
         
     switch(preprocessParams$normalize,
         none = {
@@ -231,7 +233,7 @@ resizeRanges <- function(ranges,fragLen,rc=NULL) {
         },ranges,fragLen,rc=rc))
     else
         return(cmclapply(1:length(ranges),function(i,dat,fl) {
-            message("Resizing rangeset",i," to ",fl," bases")
+            message("Resizing rangeset ",i," to ",fl," bases")
             return(trim(resize(dat[[i]],width=fl,fix="start")))
         },ranges,fragLen,rc=rc))
 }
@@ -253,9 +255,9 @@ flankFirstLast <- function(x,u,d) {
     
     # Define upstream flanking based on strand of collapsed list
     up <- rep(u,length(fst))
-    up[which(strand(y[fst]) == "-")] <- d
+    up[which(as.character(strand(y[fst])) == "-")] <- d
     do <- rep(d,length(lst))
-    do[which(strand(y[lst]) == "-")] <- u
+    do[which(as.character(strand(y[lst])) == "-")] <- u
     
     # Resize
     start(y[fst]) <- start(y[fst]) - up

@@ -151,16 +151,17 @@ rest of this tutorial, we assume that the path where the test data are placed is
 Apart from a user specified file, the reference genomic regions used by recoup 
 to construct average profiles over, can be predefined gene set from a few common
 organisms supported by recoup. See the `recoup` man page for a list of these
-organisms. In order to use this "database" of predefined genomic areas, you 
-should run the function `buildAnnotationStore` with a list of organisms, a list
-of annotation sources (Ensembl, RefSeq and UCSC supported) and a desired path to
-store the annotations (defaults to `/home/me/.recoup`). For example:
+organisms. In order to use this database of predefined genomic areas, you should
+execute at least once the function `buildAnnotationDatabase` with a list of 
+organisms, a list of annotation sources (Ensembl, RefSeq and UCSC supported) and 
+a desired path to store the annotation SQLite database (defaults to
+`file.path(system.file(package="recoup"),"annotation.sqlite")`). For example:
 
 ```
-buildAnnotationStore(c("hg19","mm9","rn4"),c("ensembl","refseq"))
+buildAnnotationDatabase(c("hg19","mm9","rn4"),c("ensembl","refseq"))
 ```
 
-See the man page of `buildAnnotationStore` for more details. This step is not
+See the man page of `buildAnnotationDatabase` for more details. This step is not
 necessary for recoup to run as these annotations can be also downloaded on the
 fly. However, if subsets of the supported organisms are to be used often, it is
 much more preferrable to spend some time building the local store as it can save

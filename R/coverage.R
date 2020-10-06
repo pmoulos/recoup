@@ -95,7 +95,7 @@ coverageFromRanges <- function(input,mask,ignore.strand,rc=NULL) {
         message("  calculating total coverage")
         
         # If mask is coming from custom genome and not from recoup annotation,
-        # then seqlengths are non-existent or do not match
+        # then seqlengths are sometimes non-existent or do not match
         if (all(is.na(seqlengths(mask))))
             seqlengths(mask) <- seqlengths(input)
         
@@ -103,7 +103,7 @@ coverageFromRanges <- function(input,mask,ignore.strand,rc=NULL) {
         preCov <- preCov[chrs]
         maskList <- split(mask,seqnames(mask))
         normFactor <- coverage(maskList)
-        normFactor <- normFactor[chrs]
+        #normFactor <- normFactor[chrs]
         covs <- cmclapply(names(maskList),function(x,maskList,preCov,
             normFactor) {
             return(lazyRangesCoverage(x,maskList,preCov,normFactor))
@@ -113,7 +113,10 @@ coverageFromRanges <- function(input,mask,ignore.strand,rc=NULL) {
             #return(list(coverage=cs,profile=ps))
         },maskList,preCov,normFactor,rc=rc)
         covs <- unlist(covs)
-        names(covs) <- names(mask)
+        if (is.null(names(covs)))
+            names(covs) <- names(mask)
+        if (all(names(covs) %in% names(mask)))
+            covs <- covs[names(mask)]
         return(covs)
     }
     else if (is(mask,"GRangesList")) {
@@ -155,7 +158,11 @@ coverageFromBigWig <- function(input,mask,rc=NULL) {
             return(lazyRangesCoverage(x,maskList,preCov))
         },maskList,preCov,rc=rc)
         covs <- unlist(covs)
-        names(covs) <- names(mask)
+        if (is.null(names(covs)))
+            names(covs) <- names(mask)
+        if (all(names(covs) %in% names(mask)))
+            covs <- covs[names(mask)]
+        #names(covs) <- names(mask)
         return(covs)
     }
     else if (is(mask,"GRangesList"))
@@ -195,7 +202,11 @@ coverageFromBam <- function(input,mask,ignore.strand,
             }
         },maskList,rc=rc)
         covs <- unlist(covs)
-        names(covs) <- names(mask)
+        if (is.null(names(covs)))
+            names(covs) <- names(mask)
+        if (all(names(covs) %in% names(mask)))
+            covs <- covs[names(mask)]
+        #names(covs) <- names(mask)
         return(covs)
     }
     else if (is(mask,"GRangesList")) {
@@ -272,7 +283,11 @@ lazyRangesCoverage <- function(x,maskList,preCov,normFactor=NULL) {
     }
     else {
         message("    ",x," not found!")
-        return(Rle(NA))
+        dum <- lapply(names(m),function(x) { 
+            return(Rle(NA)) 
+        })
+        names(dum) <- names(m)
+        return(dum)
     }
 }
 
