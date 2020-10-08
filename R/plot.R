@@ -138,7 +138,10 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
             input <- input[samples]
     }
     
-    profileColors <- vapply(input,function(x) return(x$color),character(1))
+    #profileColors <- vapply(input,function(x) return(x$color),character(1))
+    profileColors <- unlist(lapply(input,function(x) return(x$color)))
+    if (length(profileColors) < length(input))
+        profileColors <- NULL
     if (!is.null(profileColors))
         names(profileColors) <- 
             vapply(input,function(x) return(x$name),character(1))
@@ -508,7 +511,10 @@ recoupHeatmap <- function(recoupObj,samples=NULL,rc=NULL) {
     
     colorFuns <- vector("list",length(input))
     names(colorFuns) <- names(input)
-    profileColors <- vapply(input,function(x) return(x$color),character(1))
+    #profileColors <- vapply(input,function(x) return(x$color),character(1))
+    profileColors <- unlist(lapply(input,function(x) return(x$color)))
+    if (length(profileColors) < length(input))
+        profileColors <- NULL
     if (opts$plotParams$heatmapScale=="each") {
         for (n in names(colorFuns)) {
             qs <- c(0.95,0.96,0.97,0.98,0.99,0.995,0.999)
@@ -657,7 +663,10 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
             input[[n]]$profile <- input[[n]]$profile/max(input[[n]]$profile)
     }
     
-    profileColors <- vapply(input,function(x) return(x$color),character(1))
+    #profileColors <- vapply(input,function(x) return(x$color),character(1))
+    profileColors <- unlist(lapply(input,function(x) return(x$color)))
+    if (length(profileColors) < length(input))
+        profileColors <- NULL
     if (!is.null(profileColors))
         names(profileColors) <- 
             vapply(input,function(x) return(x$name),character(1))

@@ -149,38 +149,59 @@ binCoverageMatrix <- function(cvrg,binSize=1000,stat=c("mean","median"),
     return(statMatrix)
 }
 
-imputeProfile <- function(input,method=c("knn","simple"),rc=NULL) {
+imputeZero <- function(input) {
     hasMissing <- vapply(input,function(x) any(is.na(x$profile)),logical(1))
     if (!any(hasMissing))
         return(input)
     
-    method <- method[1]
-    if (method == "knn" && !requireNamespace("impute"))
-        stop("R package impute is required to perform the imputation!")
-    
     ii <- which(hasMissing)
     mn <- vapply(input[ii],function(x) x$name,character(1))
-    message("Missing values detected in profiles of ",paste0(mn,collapse=", "),
-        "! Imputing...")
     for (n in names(ii)) {
-        message("Imputing missing values for ",input[[n]]$name)
         # NaNs are extremely rare and sparse, so few neighbors
-        if (method == "simple") {
-            # Impute based on the average of its 4 neighboring values
-            miss <- which(is.na(input[[n]]$profile),arr.ind=TRUE)
-            for (r in seq_len(nrow(miss))) {
-                input[[n]]$profile[miss[r,1],miss[r,2]] <- 
-                    mean(input[[n]]$profile[miss[r,1],c(miss[r,2]-2,miss[r,2]-1,
-                        miss[r,2]+1,miss[r,2]+2)])
-            }
-        }
-        else if (method == "knn") {
-            tmp <- impute.knn(input[[n]]$profile,k=3)
-            input[[n]]$profile <- tmp$data
-        }
+        # NaNs appear in profiles with mostly zeros and are not reproducible
+        # when executed one by one...
+        # Therefore we fill with zeros quite safely            
+        miss <- which(is.na(input[[n]]$profile),arr.ind=TRUE)
+        for (r in seq_len(nrow(miss)))
+            input[[n]]$profile[miss[r,1],miss[r,2]] <- 0
     }
     return(input)
 }
+
+#imputeProfile <- function(input,method=c("knn","simple"),rc=NULL) {
+#    hasMissing <- vapply(input,function(x) any(is.na(x$profile)),logical(1))
+#    if (!any(hasMissing))
+#        return(input)
+#    
+#    method <- method[1]
+#    if (method == "knn" && !requireNamespace("impute"))
+#        stop("R package impute is required to perform the imputation!")
+#    
+#    ii <- which(hasMissing)
+#    mn <- vapply(input[ii],function(x) x$name,character(1))
+#    message("Missing values detected in profiles of ",paste0(mn,collapse=", "),
+#        "! Imputing...")
+#    for (n in names(ii)) {
+#        message("Imputing missing values for ",input[[n]]$name)
+#        # NaNs are extremely rare and sparse, so few neighbors
+#        # NaNs appear in profiles with mostly zeros and are not reproducible
+#        # when executed one by one...
+#        if (method == "simple") {
+#            # Impute based on the average of its 4 neighboring values
+#            miss <- which(is.na(input[[n]]$profile),arr.ind=TRUE)
+#            for (r in seq_len(nrow(miss))) {
+#                input[[n]]$profile[miss[r,1],miss[r,2]] <- 0
+#                    #mean(input[[n]]$profile[miss[r,1],c(miss[r,2]-2,miss[r,2]-1,
+#                    #    miss[r,2]+1,miss[r,2]+2)])
+#            }
+#        }
+#        else if (method == "knn") {
+#            tmp <- impute.knn(input[[n]]$profile,k=3)
+#            input[[n]]$profile <- tmp$data
+#        }
+#    }
+#    return(input)
+#}
 
 ################################################################################
 

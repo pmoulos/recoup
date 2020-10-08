@@ -756,8 +756,11 @@ recoup <- function(
     
     # In some strange glimpses, we are getting very few NaNs in profile matrix
     # which I was unable to reproduce on a gene by gene basis. If no NaNs are
-    # detected, no action is performed in the input object.
-    input <- imputeProfile(input,method="simple",rc)
+    # detected, no action is performed in the input object. Also, these NaNs
+    # seem to appear only on zero count gene profiles, so it's safe to impute
+    # by zero.
+    #input <- imputeProfile(input,method="simple",rc)
+    input <- imputeZero(input)
     
     # Perform the k-means clustering if requested and append to design (which
     # has been checked, if we are allowed to do so)

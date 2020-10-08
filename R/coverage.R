@@ -311,9 +311,9 @@ lazyRangesListCoverage <- function(mask,preCov,chrs,rc=NULL) {
     ## !!!For some peculiar reason, inv is not needed in the list case!!!
     ## ->!!!I think I had this wrong from the beginning...!!!<-
     #inv <- which(strand(Msimple)=="-")
-    inv <- which(as.logical(strand(Msimple)=="-"))
-    if (length(inv) > 0)
-        covs[inv] <- cmclapply(covs[inv],rev,rc=rc)
+    #inv <- which(as.logical(strand(Msimple)=="-"))
+    #if (length(inv) > 0)
+    #    covs[inv] <- cmclapply(covs[inv],rev,rc=rc)
     
     # Now we must reconstruct the initial summarized exon structure
     names(covs) <- names(Msimple)

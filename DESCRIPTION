@@ -19,7 +19,6 @@ Imports:
     graphics,
     grDevices,
     httr,
-    impute,
     methods,
     parallel,
     RSQLite,
@@ -59,8 +58,8 @@ biocViews: ImmunoOncology, Software, GeneExpression, Preprocessing,
 VignetteBuilder: knitr
 Authors@R: c(person(given="Panagiotis", family="Moulos",
     email="moulos@fleming.gr", role=c("aut", "cre")))
-Version: 1.17.2
-Date: 2020-10-06
+Version: 1.17.3
+Date: 2020-10-08
 Collate:
     'annotation.R'
     'argcheck.R'
