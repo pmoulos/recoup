@@ -8,7 +8,7 @@ r: bioc-devel
 
 bioc_packages:
  - BiocStyle
- - BiocCheck
+# - BiocCheck
 
 r_github_packages:
  - r-lib/covr
@@ -16,7 +16,7 @@ r_github_packages:
 script:
  - R CMD build .
  - R CMD check --no-build-vignettes *.tar.gz
- - R CMD BiocCheck --no-check-version-num --no-check-deprecated *.tar.gz
+# - R CMD BiocCheck --no-check-version-num --no-check-deprecated *.tar.gz
 
 #env:
 # - PKG_TARBALL=metaseqR2_1.1.15.tar.gz
