@@ -2,7 +2,8 @@
 \alias{profileMatrix}
 \title{Calculate final profile matrices for plotting}
 \usage{
-    profileMatrix(input, flank, binParams, rc = NULL)
+    profileMatrix(input, flank, binParams, rc = NULL, 
+        .feNoSplit = FALSE)
 }
 \arguments{
     \item{input}{an input list as in \code{\link{recoup}} but
@@ -19,6 +20,9 @@
 
     \item{rc}{fraction (0-1) of cores to use in a multicore 
     system. It defaults to \code{NULL} (no parallelization).}
+    
+    \item{.feNoSplit}{Temporary internal variable. Do not change
+    unless you know what you are doing!}
 }
 \value{
     Same as input with the \code{profile} fields filled.

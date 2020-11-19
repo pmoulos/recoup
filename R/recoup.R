@@ -10,6 +10,7 @@ recoup <- function(
     version="auto",
     refdb=c("ensembl","ucsc","refseq"),
     flank=c(2000,2000),
+    onFlankFail=c("drop","trim"),
     fraction=1,
     orderBy=list(
         what=c("none","suma","sumn","maxa","maxn","avga","avgn","hcn"),
@@ -58,6 +59,7 @@ recoup <- function(
         corrSmoothPar=ifelse(is.null(design),0.1,0.5),
         singleFacet=c("none","wrap","grid"),
         multiFacet=c("wrap","grid"),
+        singleFacetDirection=c("horizontal","vertical"),
         conf=TRUE,
         device=c("x11","png","jpg","tiff","bmp","pdf","ps"),
         outputDir=".",
@@ -163,15 +165,25 @@ recoup <- function(
     region <- tolower(region[1])
     refdb <- tolower(refdb[1])
     type <- tolower(type[1])
+    onFlankFail <- tolower(onFlankFail[1])
     signal <- tolower(signal[1])
     if (!is.null(design) && !is.data.frame(design))
         checkFileArgs("design",design)
     if (!is.data.frame(genome) && !is.list(genome) && file.exists(genome))
         checkFileArgs("genome",genome)
-    else if (is.character(genome))
-        checkTextArgs("genome",genome,getSupportedOrganisms(),multiarg=FALSE)
-    checkTextArgs("refdb",refdb,getSupportedRefDbs(),multiarg=FALSE)
+    else if (is.character(genome)) {
+        if (is.character(localDb) && file.exists(localDb)) {
+            if (!.userOrg(genome,localDb))
+                checkTextArgs("genome",genome,getSupportedOrganisms(),
+                    multiarg=FALSE)
+        }
+    }
+    if (is.character(localDb) && file.exists(localDb)) {
+        if (!.userRefdb(refdb,localDb))
+            checkTextArgs("refdb",refdb,getSupportedRefDbs(),multiarg=FALSE)
+    }
     checkTextArgs("type",type,c("chipseq","rnaseq"),multiarg=FALSE)
+    checkTextArgs("onFlankFail",onFlankFail,c("drop","trim"),multiarg=FALSE)
     checkTextArgs("signal",signal,c("coverage","rpm"),multiarg=FALSE)
     checkNumArgs("fraction",fraction,"numeric",c(0,1),"botheq")
     if (any(flank<0))
@@ -204,7 +216,8 @@ recoup <- function(
     # If type is rnaseq, the only allowed genomes are the ones supported by
     # recoup for the time being. In the future, a custom RNA-Seq genome may be
     # constructed from a GFF or like...
-    if (type=="rnaseq" && !(genome %in% getSupportedOrganisms()))
+    if (type=="rnaseq" && !.userOrg(genome,localDb)
+        && !(genome %in% getSupportedOrganisms()))
         stop("When type is \"rnaseq\", only the supported genomes are allowed!")
     
     # annotation must be a list to be fed to buildCustomAnnotation
@@ -291,6 +304,8 @@ recoup <- function(
             region=if (is.null(thisCall$region)) prevCallParams$region else
                 region,
             type=if (is.null(thisCall$type)) prevCallParams$type else type,
+            onFlankFail=if (is.null(thisCall$onFlankFail)) 
+                prevCallParams$onFlankFail else onFlankFail,
             signal=if (is.null(thisCall$signal)) prevCallParams$signal 
                 else signal,
             genome=if (is.null(thisCall$genome)) prevCallParams$genome else
@@ -335,6 +350,7 @@ recoup <- function(
         callParams <- list(
             region=region,
             type=type,
+            onFlankFail=onFlankFail,
             signal=signal,
             genome=genome,
             version=version,
@@ -366,7 +382,8 @@ recoup <- function(
     # Redefine all final arguments for this call
     region <- callParams$region
     type <- callParams$type
-    singnal <- callParams$signal
+    onFlankFail <- callParams$onFlankFail
+    signal <- callParams$signal
     genome <- callParams$genome
     version <- callParams$version
     refdb <- callParams$refdb
@@ -517,7 +534,7 @@ recoup <- function(
     # Read and check design compatibilities. Check if k-means is requested and
     # message accordingly. If k-means is requested it will be added to the 
     # design data frame
-    hasDesign <- FALSE
+    #hasDesign <- FALSE
     if (!is.null(design)) {
         if (!is.data.frame(design))
             design <- read.delim(design,row.names=1)
@@ -617,7 +634,7 @@ recoup <- function(
     # Here we must determine the final ranges to pass to preprocessRanges and
     # then work with these later on
     intermRanges <- getMainRanges(genomeRanges,helperRanges=helperRanges,type,
-        region,flank,rc=rc)
+        region,flank,onFlankFail,rc=rc)
     # It is very important that all the Ranges have Seqinfo objects attached as
     # they have to be trimmed for potential extensions (due to flanking regions)
     # beyond chromosome lengths. The built-in annotations do provide this option
@@ -625,12 +642,32 @@ recoup <- function(
     # interest should be provided too. Or if not provided, the user will be
     # responsible for any crash.
     # TODO: When input ranges are custom, genome should be given to make Seqinfo
-    if (type == "chipseq") # Otherwise, throw error with GRangesList
-        mainRanges <- trim(intermRanges$mainRanges)
-    else if (type == "rnaseq")
-        mainRanges <- intermRanges$mainRanges
-    bamRanges <- trim(intermRanges$bamRanges)
-
+    
+    # Should not be needed anymore with the new onFlankFail option
+    #if (type == "chipseq") # Otherwise, throw error with GRangesList
+    #    mainRanges <- trim(intermRanges$mainRanges)
+    #else if (type == "rnaseq")
+    #    mainRanges <- intermRanges$mainRanges
+    #bamRanges <- trim(intermRanges$bamRanges)
+    
+    mainRanges <- intermRanges$mainRanges
+    bamRanges <- intermRanges$bamRanges
+    hadOffBound <- intermRanges$offBound
+    # We must also correct the design in case of drop
+    if (!is.null(design) && onFlankFail == "drop" && hadOffBound)
+        design <- design[names(mainRanges),,drop=FALSE]
+    # Say something if off bound detected
+    if (hadOffBound) {
+        if (onFlankFail == "drop")
+        warning("Off bound regions detected after flanking! Offending ",
+            "regions will be dropped from the reference\n  and the design if ",
+            "provided...",immediate.=TRUE)
+    else if (onFlankFail == "trim")
+        warning("Off bound regions detected after flanking! Offending ",
+            "reference regions will be trimmed\n  and the flanking regions ",
+            "will be merged with thre main...",immediate.=TRUE)
+    }
+    
     # Here we must write code for the reading and normalization of bam files
     # The preprocessRanges function looks if there is a valid (not null) ranges
     # field in input
@@ -648,7 +685,7 @@ recoup <- function(
         #set.seed(preprocessParams$seed)
         refIndex <- sort(sample(length(mainRanges),newSize))
         mainRanges <- mainRanges[refIndex]
-        for (i in 1:length(input)) {
+        for (i in seq_len(length(input))) {
             if (!is.null(input[[i]]$ranges)) {
                 newSize <- round(fraction*length(input[[i]]$ranges))
                 #set.seed(preprocessParams$seed)
@@ -745,13 +782,17 @@ recoup <- function(
     if (signal == "coverage") { # Otherwise, matrix calculate by rpm
         if (binParams$chunking) {
             if (type=="chipseq")
-                binParams$chunks <- split(1:length(genomeRanges),
+                binParams$chunks <- split(seq_len(length(genomeRanges)),
                     as.character(seqnames(genomeRanges)))
             else if (type=="rnaseq")
-                binParams$chunks <- split(1:length(helperRanges),
+                binParams$chunks <- split(seq_len(length(helperRanges)),
                     as.character(seqnames(helperRanges)))
         }
-        input <- profileMatrix(input,flank,binParams,rc)
+        # hadOffBounds must be passed on input at some point
+        fe0 <- FALSE
+        if (onFlankFail == "trim" && hadOffBound)
+            fe0 <- TRUE
+        input <- profileMatrix(input,flank,binParams,rc,.feNoSplit=fe0)
     }
     
     # In some strange glimpses, we are getting very few NaNs in profile matrix

@@ -1,12 +1,13 @@
 checkMainArgs <- function(main.args) {
     in.args <- names(main.args)[-1] # 1st member name of calling function
     valid.args <- c("input","design","region","type","signal","genome","refdb",
-        "flank","fraction","orderBy","binParams","selector","preprocessParams",
-        "plotParams","saveParams","kmParams","strandedParams","ggplotParams",
-        "complexHeatmapParams","bamParams","onTheFly","localDb","rc")
+        "flank","onFlankFail","fraction","orderBy","binParams","selector",
+        "preprocessParams","plotParams","saveParams","kmParams",
+        "strandedParams","ggplotParams","complexHeatmapParams","bamParams",
+        "onTheFly","localDb","rc")
     invalid <- setdiff(in.args,valid.args)
     if (length(invalid) > 0) {
-        for (i in 1:length(invalid))
+        for (i in seq_len(length(invalid)))
             warning("Unknown input argument to recoup function: ",invalid[i],
                 " ...Ignoring...",immediate.=TRUE)
     }
@@ -345,7 +346,8 @@ validateListArgs <- function(what,arg.list) {
             valid.1 <- names(arg.list) %in% c("plot","profile","heatmap",
                 "correlation","device","signalScale","heatmapScale",
                 "heatmapFactor","corrScale","sumStat","smooth","corrSmoothPar",
-                "singleFacet","multiFacet","conf","outputDir","outputBase")
+                "singleFacet","multiFacet","singleFacetDirection","conf",
+                "outputDir","outputBase")
             not.valid.1 <- which(!valid.1)
             if (length(not.valid.1)>0) {
                 warning("The following ",what," argument names are invalid ",
@@ -454,6 +456,15 @@ validateListArgs <- function(what,arg.list) {
                                 "The facet option of plotParams",
                                 arg.list$multiFacet,
                                 c("wrap","grid")
+                            )
+                        },
+                        singleFacetDirection = {
+                            arg.list$singleFacetDirection <- 
+                                tolower(arg.list$singleFacetDirection[1])
+                            checkTextArgs(
+                                "The facet option of plotParams",
+                                arg.list$singleFacetDirection,
+                                c("horizontal","vertical")
                             )
                         },
                         outputDir = {
@@ -601,7 +612,7 @@ validateListArgs <- function(what,arg.list) {
 
 checkInput <- function(input) {
     # Input must have  id, file and format
-    for (i in 1:length(input)) {
+    for (i in seq_len(length(input))) {
         if (is.null(input[[i]]$id))
             stop("All input list members must have an id field! Member ",i,
                 " does not have one.")

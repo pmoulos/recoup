@@ -128,7 +128,7 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
     # Filter the profiles here
     if (!is.null(samples)) {
         if (is.numeric(samples))
-            ta <- 1:length(input)
+            ta <- seq_len(length(input))
         else 
             ta <- names(input)
         if (!all(samples %in% ta) || length(samples)==0)
@@ -151,7 +151,7 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
     if (is.null(design)) {
         # Create ggplot data
         profiles <- calcPlotProfiles(input,opts,2,rc)
-        index <- 1:length(profiles[[1]][[1]])
+        index <- seq_len(length(profiles[[1]][[1]]))
         names <- vapply(input,function(x) return(x$name),character(1))
         position <- rep(index,length(input))
         signal <- unlist(lapply(profiles,function(x) return(x$profile)))
@@ -195,6 +195,20 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
             ggplot.plot <- ggplot.plot + 
                 scale_fill_manual(values=profileColors) +
                 scale_color_manual(values=profileColors)
+        
+        if (ggParams$singleFacet=="grid") {
+            if (ggParams$singleFacetDirection=="horizontal")
+                ggplot.plot <- ggplot.plot + facet_grid(.~Condition)
+            else if (ggParams$singleFacetDirection=="vertical")
+                ggplot.plot <- ggplot.plot + facet_grid(Condition~.)
+        }
+
+        if (ggParams$singleFacet=="wrap") {
+            if (ggParams$singleFacetDirection=="horizontal")
+                ggplot.plot <- ggplot.plot + facet_wrap(.~Condition)
+            else if (ggParams$singleFacetDirection=="vertical")
+                ggplot.plot <- ggplot.plot + facet_wrap(Condition~.)
+        }
     }
     else {
         message("Using provided design to facet the coverage profiles")
@@ -216,7 +230,7 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
             # Replication factors
             pop <- vapply(x,function(x) return(length(x$profile)),integer(1))
             tmp <- vector("list",length(x))
-            for (i in 1:length(dsplit)) {
+            for (i in seq_len(length(dsplit))) {
                 if (length(dsplit[[i]])>1)
                     tmp[[i]] <- t(replicate(pop[i],dsplit[[i]]))
                 else
@@ -236,7 +250,7 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
             return(o)
         })
         
-        index <- 1:ncol(input[[1]]$profile)
+        index <- seq_len(ncol(input[[1]]$profile))
         names <- vapply(input,function(x) return(x$name),character(1))
         faceter <- do.call("rbind",lapply(designProfiles,function(x) 
                 return(x$design)))
@@ -470,7 +484,7 @@ recoupHeatmap <- function(recoupObj,samples=NULL,rc=NULL) {
     # Filter the profiles here
     if (!is.null(samples)) {
         if (is.numeric(samples))
-            ta <- 1:length(input)
+            ta <- seq_len(length(input))
         else 
             ta <- names(input)
         if (!all(samples %in% ta) || length(samples)==0)
@@ -492,7 +506,7 @@ recoupHeatmap <- function(recoupObj,samples=NULL,rc=NULL) {
         labCol <- rep("",width)
         lb <- makeHorizontalAnnotation(width,opts,"heatmap")
         labCol[round(lb$breaks)] <- lb$labels
-        grid.text(labCol,(1:width)/width,1,vjust=1,
+        grid.text(labCol,(seq_len(width))/width,1,vjust=1,
             gp=grid::gpar(cex=0.7))
     })
     
@@ -647,7 +661,7 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
     # Filter the profiles here
     if (!is.null(samples)) {
         if (is.numeric(samples))
-            ta <- 1:length(input)
+            ta <- seq_len(length(input))
         else 
             ta <- names(input)
         if (!all(samples %in% ta) || length(samples)==0)
@@ -677,7 +691,7 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
         # Create ggplot data
         profiles <- calcPlotProfiles(input,opts,1,rc)
         sorter <- orderSignals(profiles,opts)
-        index <- 1:length(profiles[[1]][[1]])
+        index <- seq_len(length(profiles[[1]][[1]]))
         names <- vapply(input,function(x) return(x$name),character(1))
         position <- rep(index,length(input))
         signal <- unlist(lapply(profiles,function(x,s,p) {
@@ -750,7 +764,7 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
             # Replication factors
             pop <- vapply(x,function(x) return(length(x$profile)),integer(1))
             tmp <- vector("list",length(x))
-            for (i in 1:length(dsplit)) {
+            for (i in seq_len(length(dsplit))) {
                 if (length(dsplit[[i]])>1)
                     tmp[[i]] <- t(replicate(pop[i],dsplit[[i]]))
                 else
@@ -781,7 +795,8 @@ recoupCorrelation <- function(recoupObj,samples=NULL,rc=NULL) {
         faceter <- do.call("rbind",lapply(designProfiles,function(x) 
                 return(x$design)))
         position <- unlist(lapply(subProfiles,function(x) {
-            return(unlist(lapply(x,function(y) return(1:length(y$profile)))))
+            return(unlist(lapply(x,function(y) 
+                return(seq_len(length(y$profile))))))
         }))
         condition <- rep(names,vapply(designProfiles,function(x) {
             return(length(x$profile))
@@ -1064,7 +1079,7 @@ orderProfiles <- function(input,opts,rc=NULL) {
             refh <- 0 # Flag to indicate order by sum/max of all profiles
     }
     byMax <- bySum <- byAvg <- FALSE
-    sorter <- list(ix=1:nrow(input[[1]]$profile))
+    sorter <- list(ix=seq_len(nrow(input[[1]]$profile)))
     if (length(grep("^sum",opts$orderBy$what,perl=TRUE))>0)
         bySum <- TRUE
     if (length(grep("^max",opts$orderBy$what,perl=TRUE))>0)
@@ -1191,7 +1206,7 @@ orderProfiles <- function(input,opts,rc=NULL) {
 }
 
 orderProfilesByDesign <- function(input,design,opts,rc=NULL) {
-    splitter <- split(1:nrow(design),design,drop=TRUE)
+    splitter <- split(seq_len(nrow(design)),design,drop=TRUE)
     sortlist <- sorter <- vector("list",length(splitter))
     names(sortlist) <- names(sorter) <- names(splitter)
     
@@ -1237,7 +1252,7 @@ orderProfilesByDesign <- function(input,design,opts,rc=NULL) {
                 refh <- 0 # Flag to indicate order by sum/max of all profiles
         }
         byMax <- bySum <- byAvg <- FALSE
-        sortlist[[n]] <- 1:length(S)
+        sortlist[[n]] <- seq_len(length(S))
         if (length(grep("^sum",opts$orderBy$what,perl=TRUE))>0)
             bySum <- TRUE
         if (length(grep("^max",opts$orderBy$what,perl=TRUE))>0)
@@ -1368,7 +1383,7 @@ orderSignals <- function(input,opts) {
         else
             refh <- rh
     }
-    sorter <- list(ix=1:length(input[[1]]$profile))
+    sorter <- list(ix=seq_len(length(input[[1]]$profile)))
     if (opts$orderBy$order=="descending")
         sorter <- sort(input[[refh]]$profile,decreasing=TRUE,index.return=TRUE)
     else
@@ -1377,7 +1392,7 @@ orderSignals <- function(input,opts) {
 }
 
 orderDesignSignals <- function(input,design,opts) {
-    splitter <- split(1:nrow(design),design,drop=TRUE)
+    splitter <- split(seq_len(nrow(design)),design,drop=TRUE)
     sortlist <- sorter <- vector("list",length(splitter))
     names(sortlist) <- names(sorter) <- names(splitter)
     
@@ -1409,7 +1424,7 @@ orderDesignSignals <- function(input,design,opts) {
             else
                 refh <- rh
         }
-        sortlist[[n]] <- list(ix=1:length(input[[1]]$profile[S]))
+        sortlist[[n]] <- list(ix=seq_len(length(input[[1]]$profile[S])))
         if (opts$orderBy$order=="descending")
             sortlist[[n]] <- sort(input[[refh]]$profile[S],decreasing=TRUE,
                 index.return=TRUE)$ix

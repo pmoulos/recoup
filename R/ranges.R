@@ -107,11 +107,11 @@ preprocessRanges <- function(input,preprocessParams,genome,bamRanges=NULL,
         
     switch(preprocessParams$normalize,
         none = {
-            for (i in 1:length(input))
+            for (i in seq_len(length(input)))
                 input[[i]]$ranges <- ranges[[i]]
         },
         linear = { # Same as none but will process after coverage calculation
-            for (i in 1:length(input))
+            for (i in seq_len(length(input)))
                 input[[i]]$ranges <- ranges[[i]]
         },
         downsample = {
@@ -122,7 +122,7 @@ preprocessRanges <- function(input,preprocessParams,genome,bamRanges=NULL,
                 return(sort(sample(x,s)))
             },downto)
             names(downsampleIndex) <- names(input)
-            for (i in 1:length(input)) {
+            for (i in seq_len(length(input))) {
                 message("Downsampling sample ",input[[i]]$name," to ",downto,
                     " reads")
                 input[[i]]$ranges <- ranges[[i]][downsampleIndex[[i]]]
@@ -136,7 +136,7 @@ preprocessRanges <- function(input,preprocessParams,genome,bamRanges=NULL,
                 return(sort(sample(x,s)))
             },preprocessParams$sampleTo)
             names(downsampleIndex) <- names(input)
-            for (i in 1:length(input)) {
+            for (i in seq_len(length(input))) {
                 message("Sampling sample ",input[[i]]$name," to ",
                     preprocessParams$sampleTo," reads")
                 input[[i]]$ranges <- ranges[[i]][downsampleIndex[[i]]]
@@ -148,7 +148,7 @@ preprocessRanges <- function(input,preprocessParams,genome,bamRanges=NULL,
 }
 
 getMainRanges <- function(genomeRanges,helperRanges=NULL,type,region,flank,
-    rc=NULL) {
+    onFlankFail,rc=NULL) {
     if (type=="rnaseq" && is.null(helperRanges))
         stop("helperRanges must be supplied when type is \"rnaseq\"")
         
@@ -156,15 +156,59 @@ getMainRanges <- function(genomeRanges,helperRanges=NULL,type,region,flank,
     message("  measurement type: ", type)
     message("  genomic region type: ", region)
     
+    offB <- FALSE
     if (type=="chipseq") {
-        mainRanges <- getRegionalRanges(genomeRanges,region,flank)
-        return(list(mainRanges=mainRanges,bamRanges=mainRanges))
+        suppressWarnings(mainRanges <- 
+            getRegionalRanges(genomeRanges,region,flank))
+        if (any(start(mainRanges) < 1)) {
+            offB <- TRUE
+            mainRanges <- .dropOrTrimGR(mainRanges,onFlankFail)
+        }
+        return(list(mainRanges=mainRanges,bamRanges=mainRanges,offBound=offB))
     }
     else if (type=="rnaseq") {
-        bamRanges <- getRegionalRanges(helperRanges,region,flank)
-        mainRanges <- getMainRnaRanges(genomeRanges,flank)
-        return(list(mainRanges=mainRanges,bamRanges=bamRanges))
+        suppressWarnings(bamRanges <- 
+            getRegionalRanges(helperRanges,region,flank))
+        if (any(start(bamRanges) < 1) || which(end(bamRanges)>seqlengths(
+            bamRanges)[as.character(seqnames(bamRanges))])) {
+            offB <- TRUE
+            bamRanges <- .dropOrTrimGR(bamRanges,onFlankFail)
+            # mainRanges will be offended as well
+            suppressWarnings(mainRanges <- 
+                getMainRnaRanges(genomeRanges,flank))
+            mainRanges <- .dropOrTrimGRL(mainRanges,onFlankFail)
+        }
+        else
+            mainRanges <- getMainRnaRanges(genomeRanges,flank)
+        return(list(mainRanges=mainRanges,bamRanges=bamRanges,offBound=offB))
     }
+}
+
+.dropOrTrimGR <- function(gr,opt) {
+    if (opt == "drop") {
+        offStart <- which(start(gr)<1)
+        offEnd <- which(end(gr)>seqlengths(gr)[as.character(seqnames(gr))])
+        bad <- union(offStart,offEnd)
+        gr <- gr[-bad]
+    }
+    else if (opt == "trim")
+        gr <- trim(gr)
+    return(gr)
+}
+
+.dropOrTrimGRL <- function(grl,opt) {
+    if (opt == "drop") {
+        offStart <- which(lengths(which(start(grl)<1))>0)
+        tmp <- unlist(grl)
+        tf <- end(tmp)>seqlengths(tmp)[as.character(seqnames(tmp))]
+        tfs <- split(tf,tmp$gene_id)
+        offEnd <- which(vapply(tfs,function(x) any(x),logical(1)))
+        bad <- union(offStart,offEnd)
+        grl <- grl[-bad]
+    }
+    else if (opt == "trim")
+        grl <- trim(grl)
+    return(grl)
 }
 
 getMainRnaRanges <- function(genomeRanges,flank) {
@@ -232,7 +276,7 @@ resizeRanges <- function(ranges,fragLen,rc=NULL) {
             return(trim(resize(dat[[n]],width=fl,fix="start")))
         },ranges,fragLen,rc=rc))
     else
-        return(cmclapply(1:length(ranges),function(i,dat,fl) {
+        return(cmclapply(seq_len(length(ranges)),function(i,dat,fl) {
             message("Resizing rangeset ",i," to ",fl," bases")
             return(trim(resize(dat[[i]],width=fl,fix="start")))
         },ranges,fragLen,rc=rc))
@@ -251,7 +295,7 @@ flankFirstLast <- function(x,u,d) {
     # How many do we have in each gene
     dif <- diff(fst) - 1
     # Based on how many, find the index of last exons
-    lst <- c(fst[1:(length(fst)-1)] + dif,length(y))
+    lst <- c(fst[seq_len(length(fst)-1)] + dif,length(y))
     
     # Define upstream flanking based on strand of collapsed list
     up <- rep(u,length(fst))
@@ -431,9 +475,9 @@ splitRanges <- function(x,n,type=c("variable","fixed"),flank=NULL,where=NULL,
         qs <- quantile(w,c(0.01,0.99))
         w[w<=qs[1]] <- qs[1]
         w[w>=qs[2]] <- qs[2]
-        cutFac <- cut(sqrt(w),breaks=n,labels=1:n)
-        #cutFac <- cut(w,breaks=n,labels=1:n)
-        #cutFac <- cut(log(w),breaks=n,labels=1:n)
+        cutFac <- cut(sqrt(w),breaks=n,labels=seq_len(n))
+        #cutFac <- cut(w,breaks=n,labels=seq_len(n))
+        #cutFac <- cut(log(w),breaks=n,labels=seq_len(n))
         cutFacFreq <- table(cutFac)
         zeroFreq <- which(cutFacFreq==0)
         if (length(zeroFreq) > 0)
@@ -521,8 +565,8 @@ splitRangesList <- function(x,n,type=c("variable","fixed"),flank=NULL,
         qs <- quantile(prew,c(0.01,0.99))
         prew[prew<=qs[1]] <- qs[1]
         prew[prew>=qs[2]] <- qs[2]
-        N <- as.numeric(cut(sqrt(prew),breaks=n,labels=1:n))
-        w <- cmclapply(1:length(N),variableRangedBinSizes,wList,N,rc=rc)
+        N <- as.numeric(cut(sqrt(prew),breaks=n,labels=seq_len(n)))
+        w <- cmclapply(seq_len(length(N)),variableRangedBinSizes,wList,N,rc=rc)
     }
     
     # Correct the contents of tmp (GRangesList) by getting the offending genes
@@ -631,7 +675,7 @@ fixedRangedBinSizes <- function(x,n) {
         return(list(binSize=x,exonsToUse=1,flag=FALSE))
     if (length(x) > n) {
          s <- sort(x,decreasing=TRUE,index.return=TRUE)
-         j <- sort(s$ix[1:n])
+         j <- sort(s$ix[seq_len(n)])
          return(list(binSize=rep(1,n),exonsToUse=j,flag=TRUE))
     }
     sumLen <- sum(x)
@@ -643,7 +687,7 @@ fixedRangedBinSizes <- function(x,n) {
         # Randomly subtract, but protect agains zero by removing from the
         # sampling space, bins of size 1
         d <- check - n
-        nonOneInds <- 1:length(binSize)
+        nonOneInds <- seq_len(length(binSize))
         sizeOne <- which(binSize==1)
         if (length(sizeOne) > 0)
             nonOneInds <- which(binSize > 1)
@@ -659,11 +703,11 @@ fixedRangedBinSizes <- function(x,n) {
             ss <- sort(binSize[nonOneInds],decreasing=TRUE,
                 index.return=TRUE)
             removeSize <- rep(1,lnoi)
-            removeSize[ss$ix[1:dd]] <- 2
+            removeSize[ss$ix[seq_len(dd)]] <- 2
             binSize[nonOneInds] <- binSize[nonOneInds] - removeSize
             if (any(binSize[nonOneInds]==0)) {
                 ze <- which(binSize==0)
-                exonsToUse <- 1:length(binSize)
+                exonsToUse <- seq_len(length(binSize))
                 binSize <- binSize[-ze]
                 exonsToUse <- exonsToUse[-ze]
                 return(list(binSize=binSize,exonsToUse=exonsToUse,
@@ -682,7 +726,7 @@ fixedRangedBinSizes <- function(x,n) {
         ii <- sample(length(binSize),d)
         binSize[ii] <- binSize[ii] + 1
     }
-    return(list(binSize=binSize,exonsToUse=1:length(binSize),flag=FALSE))
+    return(list(binSize=binSize,exonsToUse=seq_len(length(binSize)),flag=FALSE))
 }
 
 variableRangedBinSizes <- function(i,w,n) {
@@ -691,7 +735,7 @@ variableRangedBinSizes <- function(i,w,n) {
         return(list(binSize=x,exonsToUse=1,flag=FALSE))
     if (length(x) > n[i]) {
          s <- sort(x,decreasing=TRUE,index.return=TRUE)
-         j <- sort(s$ix[1:n[i]])
+         j <- sort(s$ix[seq_len(n[i])])
          return(list(binSize=rep(1,n[i]),exonsToUse=j,flag=TRUE))
     }
     sumLen <- sum(x)
@@ -701,7 +745,7 @@ variableRangedBinSizes <- function(i,w,n) {
     check <- sum(binSize)
     if (check > n[i]) {
         d <- check - n[i]
-        nonOneInds <- 1:length(binSize)
+        nonOneInds <- seq_len(length(binSize))
         sizeOne <- which(binSize==1)
         if (length(sizeOne) > 0)
             nonOneInds <- which(binSize > 1)
@@ -711,12 +755,12 @@ variableRangedBinSizes <- function(i,w,n) {
             ss <- sort(binSize[nonOneInds],decreasing=TRUE,
                 index.return=TRUE)
             removeSize <- rep(1,lnoi)
-            removeSize[ss$ix[1:dd]] <- 2
+            removeSize[ss$ix[seq_len(dd)]] <- 2
             binSize[nonOneInds] <- binSize[nonOneInds] - removeSize
             if (any(binSize[nonOneInds]==0)) {
                 print("WTF")
                 ze <- which(binSize==0)
-                exonsToUse <- 1:length(binSize)
+                exonsToUse <- seq_len(length(binSize))
                 binSize <- binSize[-ze]
                 exonsToUse <- exonsToUse[-ze]
                 return(list(binSize=binSize,exonsToUse=exonsToUse,
@@ -733,7 +777,7 @@ variableRangedBinSizes <- function(i,w,n) {
         ii <- sample(length(binSize),d)
         binSize[ii] <- binSize[ii] + 1
     }
-    return(list(binSize=binSize,exonsToUse=1:length(binSize),flag=FALSE))
+    return(list(binSize=binSize,exonsToUse=seq_len(length(binSize)),flag=FALSE))
 }
 
 .subsetGRangesByBamHeader <- function(gr,bam) {
@@ -821,36 +865,3 @@ variableRangedBinSizes <- function(i,w,n) {
 #    return(x)
 #}
 #
-#getMainRnaRangesOnTheFlyOld <- function(helperRanges,flank,rc=NULL) {
-#    message("Creating summarized exon flanking region ",flank[1]," bps and ",
-#        flank[2]," bps")
-#    leftRanges <- getFlankingRanges(helperRanges,flank[1],"upstream")
-#    elementMetadata(leftRanges) <- elementMetadata(leftRanges)[,c(2,1,3,4)]
-#    names(elementMetadata(leftRanges))[1] <- "exon_id"
-#    leftRanges <- as(leftRanges,"GRangesList")
-#    rightRanges <- getFlankingRanges(helperRanges,flank[2],"downstream")
-#    elementMetadata(rightRanges) <- elementMetadata(rightRanges)[,c(2,1,3,4)]
-#    names(elementMetadata(rightRanges))[1] <- "exon_id"
-#    rightRanges <- as(rightRanges,"GRangesList")
-#    if (is.null(rc)) {
-#        # For some progress recording...
-#        flankedSexon <- GRangesList()
-#        for (i in 1:length(genomeRanges)) {
-#            if (i%%1000 == 0)
-#                message("  processed ",i," ranges")
-#            flankedSexon[[i]] <- c(
-#                leftRanges[[i]],
-#                genomeRanges[[i]],
-#                rightRanges[[i]]
-#            )
-#        }
-#    }
-#    else {
-#        # Dangerous... must issue warning
-#        warning("Parallel creation of GRangesList object may cause a memory ",
-#            "leak. Please monitor your system.",immediate.=TRUE)
-#        flankedSexon <- cmcmapply(c,leftRanges,helperRanges,
-#            rightRanges,rc=rc)
-#    }
-#    return(flankedSexon)
-#}

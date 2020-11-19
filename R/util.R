@@ -18,7 +18,7 @@ contVector <- function(x,size=NULL,flank=NULL,where=NULL) {
             upstream = {
                 size <- flank[1]
                 if (is(x,"Rle") && !is.na(runValue(x)))
-                    x <- x[1:flank[1]]
+                    x <- x[seq_len(flank[1])]
                 else
                     return(rep(0,size))
             },
@@ -50,13 +50,19 @@ splitVector <- function(x,n,flank,where,interp,stat) {
             },
             upstream = {
                 if (is(x,"Rle") && all(!is.na(runValue(x))))
-                    x <- x[1:flank[1]]
+                    x <- x[seq_len(flank[1])]
                 else
                     return(rep(0,n))
             },
             downstream = {
                 if (is(x,"Rle") && all(!is.na(runValue(x))))
                     x <- x[(length(x)-flank[2]+1):length(x)]
+                else
+                    return(rep(0,n))
+            },
+            locus = {
+                if (is(x,"Rle") && all(!is.na(runValue(x))))
+                    x <- x[seq_len(length(x))]
                 else
                     return(rep(0,n))
             }
@@ -77,12 +83,12 @@ splitVector <- function(x,n,flank,where,interp,stat) {
     dif <- length(x) - binSize*n 
     binFac <- rep(binSize,n)
     # Random bin increase size to avoid problems
-    add <- sample(1:n,dif)
+    add <- sample(seq_len(n),dif)
     binFac[add] <- binFac[add]+1
-    f <- factor(rep(1:n,binFac))
+    f <- factor(rep(seq_len(n),binFac))
     #S <- split(x,f)
     #return(llply(S,stat))
-    S <- split(1:length(x),f)
+    S <- split(seq_len(length(x)),f)
     s <- vapply(S,function(x) x[1],integer(1))
     return(aggregate(x,FUN=stat,start=s,width=binFac))
 }
@@ -93,7 +99,7 @@ interpolateSignal <- function(x,n,interp) {
             d <- (n-length(x))/n
             if (d < 0.2) { # Then quite safe for neighborhood method
                 y <- rep(NA,n)
-                y[1:2] <- x[1:2]
+                y[c(1,2)] <- x[c(1,2)]
                 y[(n-1):n] <- x[(length(x)-1):length(x)]
                 orig.pos <- sort(sample(3:(n-2),length(x)-4))
                 y[orig.pos] <- x[3:(length(x)-2)]
@@ -122,7 +128,7 @@ interpolateSignal <- function(x,n,interp) {
         },
         neighborhood = {
             y <- rep(NA,n)
-            y[1:2] <- x[1:2]
+            y[c(1,2)] <- x[c(1,2)]
             y[(n-1):n] <- x[(length(x)-1):length(x)]
             orig.pos <- sort(sample(3:(n-2),length(x)-4))
             y[orig.pos] <- x[3:(length(x)-2)]
@@ -192,7 +198,7 @@ readConfig <- function(input) {
         }
     }
     output <- vector("list",nrow(tab))
-    for (i in 1:nrow(tab)) {
+    for (i in seq_len(nrow(tab))) {
         output[[i]]$id <- samples[i]
         output[[i]]$name <- nams[i]
         output[[i]]$file <- files[i]
@@ -301,7 +307,7 @@ reorderClusters <- function(design,newOrder) {
     # Proceed
     car <- vapply(spl,function(x) return(x[3]),character(1))
     
-    names(newOrder) <- 1:length(newOrder)
+    names(newOrder) <- seq_len(length(newOrder))
     
     # Finally, reorder
     newClus <- num
@@ -322,7 +328,7 @@ sliceObj <- function(obj,i=NULL,j=NULL,k=NULL,dropPlots=FALSE,rc=NULL) {
     if (!is.null(i)) {
         if (!is.numeric(i) && !is.character(i))
             stop("Horizontal indexing must be numeric or character!")
-        for (s in 1:length(obj$data)) {
+        for (s in seq_len(length(obj$data))) {
             if (!is.null(obj$data[[s]]$coverage))
                 obj$data[[s]]$coverage <- obj$data[[s]]$coverage[i]
             if (!is.null(obj$data[[s]]$profile))
@@ -388,7 +394,7 @@ sliceObj <- function(obj,i=NULL,j=NULL,k=NULL,dropPlots=FALSE,rc=NULL) {
                     obj$callopts$region <- "custom"
             }
         }
-        for (s in 1:length(obj$data)) {
+        for (s in seq_len(length(obj$data))) {
             if (!is.null(obj$data[[s]]$profile))
                 obj$data[[s]]$profile <- obj$data[[s]]$profile[,j,drop=FALSE]
         }
@@ -525,7 +531,7 @@ mergeRuns <- function(...,withDesign=c("auto","drop"),dropPlots=TRUE) {
     newLen <- sum(vapply(tmp,function(x) return(length(x$data)),integer(1)))
     merged$data <- vector("list",newLen)
     theNames <- character(0)
-    for (i in 1:length(tmp))
+    for (i in seq_len(length(tmp)))
         theNames <- c(theNames,names(tmp[[i]]$data))
     names(merged$data) <- theNames
 
@@ -589,10 +595,10 @@ removeData <- function(input,type=c("ranges","coverage","profile")) {
     type <- tolower(type)
     checkTextArgs("type",type,c("ranges","coverage","profile"),multiarg=TRUE)
     if (!is.null(input$data)) # Gave recoup output object
-        for (i in 1:length(input$data))
+        for (i in seq_len(length(input$data)))
             input$data[[i]][type] <- NULL
     else
-        for (i in 1:length(input))
+        for (i in seq_len(length(input)))
             input[[i]][type] <- NULL
     return(input)
 }
@@ -925,81 +931,3 @@ areColors <- function(x) {
             error=function(e) FALSE)
     },logical(1)))
 }
-
-################################################################################
-
-# Legacy functions
-
-#splitVectorOld <- function(x,n,interp,stat,seed=42) {
-#    isRle <- ifelse(is(x,"Rle"),TRUE,FALSE)
-#    if (length(x)<n) {
-#        if (isRle)
-#            x <- as.numeric(x)
-#        switch(interp,
-#            auto = {
-#                d <- (n-length(x))/n
-#                if (d < 0.2) { # Then quite safe for neighborhood method
-#                    y <- rep(NA,n)
-#                    set.seed(seed)
-#                    y[1:2] <- x[1:2]
-#                    y[(n-1):n] <- x[(length(x)-1):length(x)]
-#                    orig.pos <- sort(sample(3:(n-2),length(x)-4))
-#                    y[orig.pos] <- x[3:(length(x)-2)]
-#                    na <- which(is.na(y))
-#                    avinds <- lapply(na,function(z) {
-#                        return(c(z-2,z-1,z+1,z+2))
-#                    })
-#                    xx <- unlist(lapply(avinds,function(ii,yy) {
-#                        return(mean(yy[ii],na.rm=TRUE))
-#                    },y))
-#                    y[na] <- xx
-#                    x <- y
-#                }
-#                else { # Spline is the safest
-#                    x <- spline(x,n=n)$y
-#                    x[x<0] <- 0
-#                }
-#            },
-#            spline = {
-#                x <- spline(x,n=n)$y
-#                x[x<0] <- 0
-#            },
-#            linear = {
-#                x <- approx(x,n=n)$y
-#                x[x<0] <- 0
-#            },
-#            neighborhood = {
-#                y <- rep(NA,n)
-#                set.seed(seed)
-#                y[1:2] <- x[1:2]
-#                y[(n-1):n] <- x[(length(x)-1):length(x)]
-#                orig.pos <- sort(sample(3:(n-2),length(x)-4))
-#                y[orig.pos] <- x[3:(length(x)-2)]
-#                na <- which(is.na(y))
-#                avinds <- lapply(na,function(z) {
-#                    return(c(z-2,z-1,z+1,z+2))
-#                })
-#                xx <- unlist(lapply(avinds,function(ii,yy) {
-#                    return(mean(yy[ii],na.rm=TRUE))
-#                },y))
-#                y[na] <- xx
-#                x <- y
-#            }
-#        )
-#        if (isRle)
-#            x <- Rle(x)
-#    }
-#    binSize <- floor(length(x)/n)
-#    dif <- length(x) - binSize*n 
-#    binFac <- rep(binSize,n)
-#    # Random bin increase size to avoid problems
-#    set.seed(seed)
-#    add <- sample(1:n,dif)
-#    binFac[add] <- binFac[add]+1
-#    f <- factor(rep(1:n,binFac))
-#    #S <- split(x,f)
-#    #return(llply(S,stat))
-#    S <- split(1:length(x),f)
-#    s <- sapply(S,function(x) x[1])
-#    return(aggregate(x,FUN=stat,start=s,width=binFac))
-#}

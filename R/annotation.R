@@ -138,7 +138,7 @@ buildAnnotationDatabase <- function(organisms,sources,
                     #ann <- as.data.frame(annGr)
                     annList <- reduceTranscripts(annGr)
                     ann <- as.data.frame(annList$model)
-                    ann <- ann[,c(1:3,6,7,5,8,9)]
+                    ann <- ann[,c(1,2,3,6,7,5,8,9)]
                     names(ann)[1] <- "chromosome"
                     ann$chromosome <- as.character(ann$chromosome)
                     ann <- ann[order(ann$chromosome,ann$start),]
@@ -209,7 +209,7 @@ buildAnnotationDatabase <- function(organisms,sources,
                     message("Merging exons for ",o," from ",s," version ",v)
                     annList <- reduceExons(annGr)
                     ann <- as.data.frame(annList$model)
-                    ann <- ann[,c(1:3,6,7,5,8,9)]
+                    ann <- ann[,c(1,2,3,6,7,5,8,9)]
                     names(ann)[1] <- "chromosome"
                     ann$chromosome <- as.character(ann$chromosome)
                     ann <- ann[order(ann$chromosome,ann$start),]
@@ -290,8 +290,8 @@ buildCustomAnnotation <- function(gtfFile,metadata,
     
     parsed <- parseCustomGtf(gtfFile)
     
-    s <- metadata$source
-    o <- metadata$organism
+    s <- tolower(metadata$source)
+    o <- tolower(metadata$organism)
     v <- metadata$version
         
     # Retrieve gene annotations
@@ -449,6 +449,8 @@ loadAnnotation <- function(genome,refdb,type=c("gene","exon","utr"),
     if (!requireNamespace("RSQLite"))
         stop("R package RSQLite is required to load annotation from database!")
     
+    genome <- tolower(genome[1])
+    refdb <- tolower(refdb[1])
     type <- type[1]
     checkTextArgs("type",type,c("gene","exon","utr"),multiarg=FALSE)
     if (version != "auto")
@@ -494,7 +496,7 @@ loadAnnotation <- function(genome,refdb,type=c("gene","exon","utr"),
             if (asdf) {
                 a <- attr(ann,"activeLength")
                 ann <- as.data.frame(unname(ann))
-                ann <- ann[,c(1:3,6,7,5,8,9)]
+                ann <- ann[,c(1,2,3,6,7,5,8,9)]
                 names(ann)[1] <- "chromosome"
                 if (!is.null(a))
                     attr(ann,"activeLength") <- a
@@ -516,7 +518,7 @@ loadAnnotation <- function(genome,refdb,type=c("gene","exon","utr"),
             if (asdf) {
                 a <- attr(ann,"activeLength")
                 ann <- as.data.frame(unname(ann))
-                ann <- ann[,c(1:3,6,7,5,8,9)]
+                ann <- ann[,c(1,2,3,6,7,5,8,9)]
                 names(ann)[1] <- "chromosome"
                 if (!is.null(a))
                     attr(ann,"activeLength") <- a
@@ -800,7 +802,7 @@ getUserAnnotations <- function(obj=NULL) {
 }
 
 correctTranscripts <- function(ann) {
-    rownames(ann) <- paste("T",1:nrow(ann),sep="_")
+    rownames(ann) <- paste("T",seq_len(nrow(ann)),sep="_")
     len <- ann[,3] - ann[,2]
     len <- len[-which(is.na(len))]
     len[len==0] <- 1
@@ -860,7 +862,7 @@ reduceTranscripts <- function(gr) {
     
     # Start the reconstruction by getting new lengths and create names
     lens <- lengths(grList)
-    inds <- unlist(lapply(lens,function(j) return(1:j)),use.names=FALSE)
+    inds <- unlist(lapply(lens,function(j) return(seq_len(j))),use.names=FALSE)
     grNew <- unname(unlist(grList))
     gene_id <- rep(gene,lens)
     transcript_id <- paste(gene_id,"MET",inds,sep="_")
@@ -917,7 +919,7 @@ reduceTranscriptsUtr <- function(gr) {
     
     # Start the reconstruction by getting new lengths and create names
     lens <- lengths(grList)
-    inds <- unlist(lapply(lens,function(j) return(1:j)),use.names=FALSE)
+    inds <- unlist(lapply(lens,function(j) return(seq_len(j))),use.names=FALSE)
     grNew <- unname(unlist(grList))
     transcript_id <- paste(rep(trans,lens),"MEU",inds,sep="_")
     gene_id <- rep(gi,lens)
@@ -977,7 +979,7 @@ reduceExons <- function(gr) {
     
     # Start the reconstruction by getting new lengths and create names
     lens <- lengths(grList)
-    inds <- unlist(lapply(lens,function(j) return(1:j)),use.names=FALSE)
+    inds <- unlist(lapply(lens,function(j) return(seq_len(j))),use.names=FALSE)
     grNew <- unname(unlist(grList))
     gene_id <- rep(gene,lens)
     exon_id <- paste(gene_id,"MEX",inds,sep="_")
@@ -1221,11 +1223,11 @@ getUcscAnnotation <- function(org,type,refdb="ucsc",chunkSize=500,rc=NULL) {
             d <- which(duplicated(ann$transcript_id))
         }
         rownames(ann) <- ann$transcript_id
-        ann <- ann[,c(1:4,8,5:7)]
+        ann <- ann[,c(1,2,3,4,8,5:7)]
     }
     else if (type=="exon") {
         rawAnn <- rawAnn[grep(chrsExp,rawAnn$chromosome,perl=TRUE),]
-        exList <- cmclapply(as.list(1:nrow(rawAnn)),function(x,d) {
+        exList <- cmclapply(as.list(seq_len(nrow(rawAnn))),function(x,d) {
             r <- d[x,,drop=FALSE]
             starts <- as.numeric(strsplit(r[,"start"],",")[[1]])
             ends <- as.numeric(strsplit(r[,"end"],",")[[1]])
@@ -1233,7 +1235,7 @@ getUcscAnnotation <- function(org,type,refdb="ucsc",chunkSize=500,rc=NULL) {
             ret <- data.frame(
                 rep(r[,"chromosome"],nexons),
                 starts,ends,
-                paste(r[,"exon_id"],"_e",1:nexons,sep=""),
+                paste(r[,"exon_id"],"_e",seq_len(nexons),sep=""),
                 rep(r[,"strand"],nexons),
                 rep(r[,"gene_id"],nexons),
                 rep(r[,"gene_name"],nexons),
@@ -1250,11 +1252,11 @@ getUcscAnnotation <- function(org,type,refdb="ucsc",chunkSize=500,rc=NULL) {
         mo <- N%%chunkSize
         if (mo == 0) {
             fl <- N/chunkSize
-            fac <- factor(rep(1:fl,each=chunkSize))
+            fac <- factor(rep(seq_len(fl),each=chunkSize))
         }
         else {
             fl <- (N-mo)/chunkSize
-            fac <- factor(c(rep(1:fl,each=chunkSize),rep(fl,mo)))
+            fac <- factor(c(rep(seq_len(fl),each=chunkSize),rep(fl,mo)))
         }
         exChunkedList <- split(exList,fac)
         # Merge the chunks
@@ -1294,7 +1296,7 @@ getUcscAnnotation <- function(org,type,refdb="ucsc",chunkSize=500,rc=NULL) {
         
         preAnn <- getUcscUtr(org,refdb)
         preAnn <- as.data.frame(preAnn)
-        preAnn <- preAnn[,c(1:3,6,7,5,8,9)]
+        preAnn <- preAnn[,c(1,2,3,6,7,5,8,9)]
         preAnn <- preAnn[grep(chrsExp,preAnn$seqnames,perl=TRUE),]
         names(preAnn) <- c("chromosome","start","end","transcript_id","gene_id",
             "strand","gene_name","biotype")
@@ -1560,7 +1562,7 @@ getChromInfo <- function(org,
         file.path(tempdir(),"chromInfo.txt.gz"),quiet=TRUE)
     chromInfo <- read.delim(file.path(tempdir(),"chromInfo.txt.gz"),
         header=FALSE)
-    chromInfo <- chromInfo[,1:2]
+    chromInfo <- chromInfo[,c(1,2)]
     chromInfo[,1] <- as.character(chromInfo[,1])
     chromInfo$V3 <- rep(FALSE,nrow(chromInfo))
     m <- grep("M",chromInfo[,1])
@@ -2250,7 +2252,10 @@ parseCustomGtf <- function(gtfFile) {
     message("  Importing GTF ",gtfFile," as GTF to make id map")
     desiredColumns <- c("type","gene_id","transcript_id","exon_id",
         "gene_name","gene_biotype")
-    gr <- import(gtfFile,format="gtf",colnames=desiredColumns,
+    #gr <- import(gtfFile,format="gtf",colnames=desiredColumns,
+    #    feature.type=GenomicFeatures:::GFF_FEATURE_TYPES)
+    ## Let it recognize automatically GFF/GTF
+    gr <- import(gtfFile,colnames=desiredColumns,
         feature.type=GenomicFeatures:::GFF_FEATURE_TYPES)
     grdf <- as.data.frame(gr)
     grdf <- grdf[grdf$type=="exon",]
@@ -2297,27 +2302,36 @@ annotationFromCustomGtf <- function(parsed,type=c("gene","exon","utr"),
 }
 
 .makeGeneGeneFromTxDb <- function(txdb,map,asdf) {
-    gr <- genes(txdb)
-                    
-    # We need to add gc_content, gene_name, biotype from the map
-    # Remove the exon_id and transcript_id columns from the map
-    # for the gene case
-    ir <- c(which(names(map)=="exon_id"),
-        which(names(map)=="transcript_id"))
-    if (length(ir) > 0)
-        smap <- map[,-ir,drop=FALSE]
-    dgt <- which(duplicated(smap))
-    if (length(dgt) > 0)
-        smap <- smap[-dgt,]
+    if (!is.null(map)) {
+        gr <- genes(txdb)
+        # We need to add gc_content, gene_name, biotype from the map
+        # Remove the exon_id and transcript_id columns from the map
+        # for the gene case
+        ir <- c(which(names(map)=="exon_id"),
+            which(names(map)=="transcript_id"))
+        if (length(ir) > 0)
+            smap <- map[,-ir,drop=FALSE]
+        dgt <- which(duplicated(smap))
+        if (length(dgt) > 0)
+            smap <- smap[-dgt,]
+        
+        # Add metadata from the map
+        rownames(smap) <- smap$gene_id
+        smap <- smap[names(gr),,drop=FALSE]
+        gr$gene_name <- smap$gene_name
+        gr$biotype <- smap$biotype
+    }
+    else {
+        gr <- genes(txdb,columns=c("gene_id","tx_type"))
+        gr$gene_id <- as.character(gr$gene_id)
+        gr$gene_name <- gr$gene_id
+        gr$biotype <- unlist(gr$tx_type)
+        gr$tx_type <- NULL
+    }
     
-    # Add metadata from the map
-    rownames(smap) <- smap$gene_id
-    smap <- smap[names(gr),,drop=FALSE]
-    gr$gene_name <- smap$gene_name
-    gr$biotype <- smap$biotype
     gr$gc_content = rep(50,length(gr))
     ann <- as.data.frame(gr)
-    ann <- ann[,c(1:3,6,9,5,7,8)]
+    ann <- ann[,c(1,2,3,6,9,5,7,8)]
     names(ann)[1] <- "chromosome"
     ann$chromosome <- as.character(ann$chromosome)
     ann <- ann[order(ann$chromosome,ann$start),]
@@ -2329,30 +2343,88 @@ annotationFromCustomGtf <- function(parsed,type=c("gene","exon","utr"),
 }
 
 .makeGeneExonFromTxDb <- function(txdb,map,asdf) {
-    gr <- exons(txdb,columns="exon_name")
-    names(gr) <- gr$exon_name
+    if (!is.null(map)) {
+        gr <- exons(txdb,columns="exon_name")
+        
+        # There are cases where exons are unnamed and just the structure 
+        useMap <- TRUE
+        if (any(is.na(gr$exon_name)))
+            useMap <- FALSE
+        
+        if (useMap) {
+            names(gr) <- gr$exon_name
+        
+            # We need to add gene_id, gene_name, biotype from the map
+            # Remove the transcript_id column from the map for the gene
+            # case
+            ir <- which(names(map)=="transcript_id")
+            if (length(ir) > 0)
+                smap <- map[,-ir,drop=FALSE]
+            dgt <- which(duplicated(smap))
+            if (length(dgt) > 0)
+                smap <- smap[-dgt,]
+            
+            # Add metadata from the map
+            rownames(smap) <- smap$exon_id
+            smap <- smap[names(gr),,drop=FALSE]
+            gr$gene_id <- smap$gene_id
+            gr$gene_name <- smap$gene_name
+            gr$biotype <- smap$biotype
+        }
+        else {
+            # In order to create the exon annotation, we need to manually 
+            # overlap and assign to genes
+            ge <- genes(txdb,columns=c("gene_id","tx_type"))
+            ov <- findOverlaps(gr,ge)
+            exonPos <- queryHits(ov)
+            genePos <- subjectHits(ov)
+            levs <- unique(genePos)
+            
+            dup <- which(duplicated(exonPos))
+            if (length(dup) > 0) {
+                exonPos <- exonPos[-dup]
+                genePos <- genePos[-dup]
+            }
+            
+            S <- split(exonPos,factor(genePos,levels=levs))
+            gr$gene_id <- gr$gene_name <- rep(names(ge)[levs],lengths(S))
+            gr$biotype <- rep(unlist(ge$tx_type,use.names=FALSE)[levs],
+                lengths(S))
+            #gr$biotype <- rep("gene",length(gr))
+            if (is(gr$gene_id,"CharacterList"))
+                gtmp <- unlist(lapply(gr$gene_id,function(x) x[1]))
+            else
+                gtmp <- gr$gene_id
+            names(gr) <- paste(seqnames(gr),":",start(gr),"-",end(gr),"_",
+                gtmp,sep="")
+            gr$exon_name <- names(gr)
+        }
+    }
+    else {
+        gr <- exons(txdb,columns=c("exon_name","gene_id","tx_type"))
+        if (is(gr$gene_id,"CharacterList"))
+            gtmp <- unlist(lapply(gr$gene_id,function(x) x[1]))
+        else
+            gtmp <- gr$gene_id
+        if (any(is.na(gr$exon_name)))            
+            names(gr) <- paste(seqnames(gr),":",start(gr),"-",end(gr),"_",
+                gtmp,sep="")
+        else
+            names(gr) <- gr$exon_name
+        gr$gene_id <- gtmp
+        gr$gene_name <- gr$gene_id
+        gr$biotype <- unlist(lapply(gr$tx_type,function(x) x[1]))
+        gr$tx_type <- NULL
+    }
     
-    # We need to add gene_id, gene_name, biotype from the map
-    # Remove the transcript_id column from the map for the gene
-    # case
-    ir <- which(names(map)=="transcript_id")
-    if (length(ir) > 0)
-        smap <- map[,-ir,drop=FALSE]
-    dgt <- which(duplicated(smap))
-    if (length(dgt) > 0)
-        smap <- smap[-dgt,]
-    
-    # Add metadata from the map
-    rownames(smap) <- smap$exon_id
-    smap <- smap[names(gr),,drop=FALSE]
-    gr$gene_id <- smap$gene_id
-    gr$gene_name <- smap$gene_name
-    gr$biotype <- smap$biotype
     ann <- as.data.frame(unname(gr))
-    ann <- ann[,c(1:3,6,8,5,7,9)]
+    ann <- ann[,c(1,2,3,6,7,5,8,9)]
     names(ann)[c(1,4)] <- c("chromosome","exon_id")
     ann$chromosome <- as.character(ann$chromosome)
     ann <- ann[order(ann$chromosome,ann$start),]
+    if (length(unique(ann$exon_id)) == length(ann$exon_id))
+        # Should always be TRUE
+        rownames(ann) <- as.character(ann$exon_id)
     
     if (asdf)
         return(ann)
@@ -2361,27 +2433,80 @@ annotationFromCustomGtf <- function(parsed,type=c("gene","exon","utr"),
 }
 
 .makeSumGeneExonFromTxDb <- function(txdb,map,asdf) {
-    gr <- exons(txdb,columns="exon_name")
-    names(gr) <- gr$exon_name
+    if (!is.null(map)) {
+        gr <- exons(txdb,columns="exon_name")
+        
+        useMap <- TRUE
+        if (any(is.na(gr$exon_name)))
+            useMap <- FALSE
+        
+        if (useMap) {
+            names(gr) <- gr$exon_name
+            
+            # We need to add gene_id, gene_name, biotype from the map
+            # Remove the transcript_id column from the map for the gene
+            # case
+            ir <- which(names(map)=="transcript_id")
+            if (length(ir) > 0)
+                smap <- map[,-ir,drop=FALSE]
+            dgt <- which(duplicated(smap))
+            if (length(dgt) > 0)
+                smap <- smap[-dgt,]
+            
+            # Add metadata from the map
+            rownames(smap) <- smap$exon_id
+            smap <- smap[names(gr),,drop=FALSE]
+            gr$gene_id <- smap$gene_id
+            gr$gene_name <- smap$gene_name
+            gr$biotype <- smap$biotype
+        }
+        else {
+            # In order to create the exon annotation, we need to manually 
+            # overlap and assign to genes
+            ge <- genes(txdb,columns=c("gene_id","tx_type"))
+            ov <- findOverlaps(gr,ge)
+            exonPos <- queryHits(ov)
+            genePos <- subjectHits(ov)
+            levs <- unique(genePos)
+            
+            dup <- which(duplicated(exonPos))
+            if (length(dup) > 0) {
+                exonPos <- exonPos[-dup]
+                genePos <- genePos[-dup]
+            }
+            
+            S <- split(exonPos,factor(genePos,levels=levs))
+            gr$gene_id <- gr$gene_name <- rep(names(ge)[levs],lengths(S))
+            gr$biotype <- rep(unlist(ge$tx_type,use.names=FALSE)[levs],
+                lengths(S))
+            if (is(gr$gene_id,"CharacterList"))
+                gtmp <- unlist(lapply(gr$gene_id,function(x) x[1]))
+            else
+                gtmp <- gr$gene_id
+            names(gr) <- paste(seqnames(gr),":",start(gr),"-",end(gr),"_",
+                gtmp,sep="")
+            gr$exon_name <- names(gr)
+        }
+    }
+    else {
+        gr <- exons(txdb,columns=c("exon_name","gene_id","tx_type"))
+        if (is(gr$gene_id,"CharacterList"))
+            gtmp <- unlist(lapply(gr$gene_id,function(x) x[1]))
+        else
+            gtmp <- gr$gene_id
+        if (any(is.na(gr$exon_name)))            
+            names(gr) <- paste(seqnames(gr),":",start(gr),"-",end(gr),"_",
+                gtmp,sep="")
+        else
+            names(gr) <- gr$exon_name
+        gr$gene_id <- gtmp
+        gr$gene_name <- gr$gene_id
+        gr$biotype <- unlist(lapply(gr$tx_type,function(x) x[1]))
+        gr$tx_type <- NULL
+    }
     
-    # We need to add gene_id, gene_name, biotype from the map
-    # Remove the transcript_id column from the map for the gene
-    # case
-    ir <- which(names(map)=="transcript_id")
-    if (length(ir) > 0)
-        smap <- map[,-ir,drop=FALSE]
-    dgt <- which(duplicated(smap))
-    if (length(dgt) > 0)
-        smap <- smap[-dgt,]
-    
-    # Add metadata from the map
-    rownames(smap) <- smap$exon_id
-    smap <- smap[names(gr),,drop=FALSE]
-    gr$gene_id <- smap$gene_id
-    gr$gene_name <- smap$gene_name
-    gr$biotype <- smap$biotype
     ann <- as.data.frame(unname(gr))
-    ann <- ann[,c(1:3,6,8,5,7,9)]
+    ann <- ann[,c(1,2,3,6,8,5,7,9)]
     names(ann)[c(1,4)] <- c("chromosome","exon_id")
     ann$chromosome <- as.character(ann$chromosome)
     ann <- ann[order(ann$chromosome,ann$start),]
@@ -2396,7 +2521,7 @@ annotationFromCustomGtf <- function(parsed,type=c("gene","exon","utr"),
     
     if (asdf) {
         eann <- as.data.frame(sexon)
-        eann <- eann[,c(1:3,6,8,5,7,9)]
+        eann <- eann[,c(1,2,3,6,8,5,7,9)]
         names(eann)[c(1,4)] <- c("chromosome","exon_id")
         attr(eann,"activeLength") <- activeLength
         return(eann)
@@ -2430,23 +2555,54 @@ annotationFromCustomGtf <- function(parsed,type=c("gene","exon","utr"),
         "exon_rank","strand","exon_name")
     utr <- utrTmp[,keep]
     
-    rownames(utr) <- paste(utr$exon_name,utr$transcript_id,sep="_")
-    rownames(map) <- paste(map$exon_id,map$transcript_id,sep="_")
+    useMap <- TRUE
+    if (any(is.na(utr$exon_name)) || is.null(map))
+        # Impossible to take info from map...
+        useMap <- FALSE
+    else
+        rownames(utr) <- paste(utr$exon_name,utr$transcript_id,sep="_")
+        
+    if (useMap) {
+        rownames(map) <- paste(map$exon_id,map$transcript_id,sep="_")
+
+        # Different case with map here
+        smap <- map[rownames(utr),]
+        
+        # We need to add gene_id, gene_name, biotype from the map
+        # Remove the exon_id column from the map for the gene case
+        ir <- which(names(smap)=="exon_id")
+        if (length(ir) > 0)
+            smap <- smap[,-ir,drop=FALSE]
+        
+        # Add metadata from the map
+        utr$gene_id <- smap$gene_id
+        utr$gene_name <- smap$gene_name
+        utr$biotype <- smap$biotype
+    }
+    else {
+        # Add metadata from the utr frame
+        utr$gene_id <- utr$transcript_id
+        utr$gene_name <- utr$gene_id
+        
+        # To get biotypes
+        ge <- genes(txdb,columns=c("gene_id","tx_type"))
+        ov <- findOverlaps(utrGr,ge)
+        utrPos <- queryHits(ov)
+        genePos <- subjectHits(ov)
+        levs <- unique(genePos)
+        
+        dup <- which(duplicated(utrPos))
+        if (length(dup) > 0) {
+            utrPos <- utrPos[-dup]
+            genePos <- genePos[-dup]
+        }
+        
+        S <- split(utrPos,factor(genePos,levels=levs))
+        utr$biotype <- rep(unlist(ge$tx_type,use.names=FALSE)[levs],lengths(S))
+        #utr$biotype <- rep("gene",nrow(utr))
+    }
     
-    # Different case with map here
-    smap <- map[rownames(utr),]
-    
-    # We need to add gene_id, gene_name, biotype from the map
-    # Remove the exon_id column from the map for the gene case
-    ir <- which(names(smap)=="exon_id")
-    if (length(ir) > 0)
-        smap <- smap[,-ir,drop=FALSE]
-    
-    # Add metadata from the map
-    utr$gene_id <- smap$gene_id
-    utr$gene_name <- smap$gene_name
-    utr$biotype <- smap$biotype
-    ann <- utr[,c(1:4,8,6,9,10)]
+    ann <- utr[,c(1,2,3,4,8,6,9,10)]
     names(ann)[1] <- "chromosome"
     ann$chromosome <- as.character(ann$chromosome)
     ann <- ann[order(ann$chromosome,ann$start),]
@@ -2481,23 +2637,51 @@ annotationFromCustomGtf <- function(parsed,type=c("gene","exon","utr"),
         "exon_rank","strand","exon_name")
     utr <- utrTmp[,keep]
     
-    rownames(utr) <- paste(utr$exon_name,utr$transcript_id,sep="_")
-    rownames(map) <- paste(map$exon_id,map$transcript_id,sep="_")
+    useMap <- TRUE
+    if (any(is.na(utr$exon_name)) || is.null(map))
+        useMap <- FALSE
+    else
+        rownames(utr) <- paste(utr$exon_name,utr$transcript_id,sep="_")
     
-    # Different case with map here
-    smap <- map[rownames(utr),]
+    if (useMap) {
+        rownames(map) <- paste(map$exon_id,map$transcript_id,sep="_")
     
-    # We need to add gene_id, gene_name, biotype from the map
-    # Remove the exon_id column from the map for the gene case
-    ir <- which(names(smap)=="exon_id")
-    if (length(ir) > 0)
-        smap <- smap[,-ir,drop=FALSE]
-    
-    # Add metadata from the map
-    utr$gene_id <- smap$gene_id
-    utr$gene_name <- smap$gene_name
-    utr$biotype <- smap$biotype
-    ann <- utr[,c(1:4,8,6,9,10)]
+        # Different case with map here
+        smap <- map[rownames(utr),]
+        
+        # We need to add gene_id, gene_name, biotype from the map
+        # Remove the exon_id column from the map for the gene case
+        ir <- which(names(smap)=="exon_id")
+        if (length(ir) > 0)
+            smap <- smap[,-ir,drop=FALSE]
+        
+        # Add metadata from the map
+        utr$gene_id <- smap$gene_id
+        utr$gene_name <- smap$gene_name
+        utr$biotype <- smap$biotype
+    }
+    else {
+        # Add metadata from the utr frame
+        utr$gene_id <- utr$transcript_id
+        utr$gene_name <- utr$gene_id
+        
+        # To get biotypes
+        ge <- genes(txdb,columns=c("gene_id","tx_type"))
+        ov <- findOverlaps(utrGr,ge)
+        utrPos <- queryHits(ov)
+        genePos <- subjectHits(ov)
+        levs <- unique(genePos)
+        
+        dup <- which(duplicated(utrPos))
+        if (length(dup) > 0) {
+            utrPos <- utrPos[-dup]
+            genePos <- genePos[-dup]
+        }
+        
+        S <- split(utrPos,factor(genePos,levels=levs))
+        utr$biotype <- rep(unlist(ge$tx_type,use.names=FALSE)[levs],lengths(S))
+    }
+    ann <- utr[,c(1,2,3,4,8,6,9,10)]
     names(ann)[1] <- "chromosome"
     ann$chromosome <- as.character(ann$chromosome)
     ann <- ann[order(ann$chromosome,ann$start),]
@@ -2512,8 +2696,13 @@ annotationFromCustomGtf <- function(parsed,type=c("gene","exon","utr"),
     
     if (asdf) {
         sann <- as.data.frame(s3utr)
-        sann <- sann[,c(1:3,6,8,5,7,9)]
-        names(sann)[c(1,4)] <- c("chromosome","gene_id")
+        sann <- sann[,c(1,2,3,6,8,5,7,9)]
+        if (useMap)
+            names(sann)[c(1,4)] <- c("chromosome","gene_id")
+        else {
+            sann <- sann[,c(1,2,3,7,5,6,4,8)]
+            names(sann)[c(1,4,7)] <- c("chromosome","gene_id","transcript_id")
+        }
         attr(sann,"activeLength") <- activeLength
         return(sann)
     }
@@ -2522,6 +2711,13 @@ annotationFromCustomGtf <- function(parsed,type=c("gene","exon","utr"),
 }
 
 .makeIdMap <- function(grdf) {
+    # Some basic names must be present in order to make a map
+    if (!any(c("exon_id","transcript_id","gene_id") %in% names(grdf))
+        || any(is.na(grdf$exon_id))
+        || any(is.na(grdf$transcript_id))
+        || any(is.na(grdf$gene_id)))
+        return(NULL)
+
     #hasGeneName <- hasBiotype <- FALSE
     if (!all(is.na(grdf$gene_name)) && !all(is.na(grdf$gene_biotype))) {
         map <- grdf[,c("exon_id","transcript_id","gene_id","gene_name",

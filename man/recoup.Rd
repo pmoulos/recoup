@@ -16,6 +16,7 @@
         version = "auto",
         refdb = c("ensembl", "ucsc", "refseq"),
         flank = c(2000, 2000),
+        onFlankFail = c("drop","trim"),
         fraction = 1,
         orderBy = list(
             what = c("none", "suma", "sumn", 
@@ -60,6 +61,7 @@
                 0.5),
             singleFacet = c("none", "wrap", "grid"),
             multiFacet = c("wrap", "grid"),
+            singleFacetDirection = c("horizontal", "vertical"),
             conf = TRUE,
             device = c("x11", "png", "jpg", "tiff", "bmp",
                 "pdf", "ps"),
@@ -195,6 +197,17 @@
     \item{flank}{a vector of length two with the number of
     base pairs to flank upstream and downstream the 
     \code{region}. Minimum flank is 0bp and maximum is
+    50kb. It is always expressed in bp.}
+    
+    \item{onFlankFail}{action to be taken when flanking
+    causes the requested plot genomic coordinates to go 
+    beyond the lengths of reference sequences (e.g. 
+    chromosomes). It can be \code{"drop"} (default) or
+    \code{"trim"}. Note that trimming will cause the 
+    flanking and main regions to be merged in genebody
+    plots and therefore possibly reducing plot resolution.}
+     
+    \code{region}{Minimum flank is 0bp and maximum is
     50kb. It is always expressed in bp.}
     
     \item{fraction}{a number from 0 to 1 (default) denoting
@@ -398,6 +411,11 @@
         Can be \code{"wrap"} (default) or \code{"grid"}.
         2 or 3 (3rd would be colour) factor designs are 
         faceted with \code{"grid"}.
+        \item \code{singleFacetDirection}: if single 
+        facetting is requested, how should the panels be
+        arranged, horizontally (default, 
+        \code{"horizontal"}) or vertically
+        (\code{"vertical"}).
         \item \code{conf}: plot also confidence intervals
         using \code{geom_ribbon} in profile or correlation
         plots.
