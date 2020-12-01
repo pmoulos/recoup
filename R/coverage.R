@@ -310,7 +310,7 @@ lazyRangesListCoverage <- function(mask,preCov,chrs,rc=NULL) {
     
     ## !!!For some peculiar reason, inv is not needed in the list case!!!
     ## ->!!!I think I had this wrong from the beginning...!!!<-
-    #inv <- which(strand(Msimple)=="-")
+    ##! Update 01/12/2020 - See comment towards end - SERIOUS!
     #inv <- which(as.logical(strand(Msimple)=="-"))
     #if (length(inv) > 0)
     #    covs[inv] <- cmclapply(covs[inv],rev,rc=rc)
@@ -318,8 +318,10 @@ lazyRangesListCoverage <- function(mask,preCov,chrs,rc=NULL) {
     # Now we must reconstruct the initial summarized exon structure
     names(covs) <- names(Msimple)
     # Get unique gene names from composite Rle list names
+    # Some exotic GTFs may have dots in the actual gene name...
     genes <- vapply(strsplit(names(covs),".",fixed=TRUE),function(x) {
-        return(x[2])
+        anchor <- grep(x[2],x,fixed=TRUE)
+        return(paste(x[anchor[1]:(anchor[2]-1)],collapse="."))
     },character(1))
     names(covs) <- genes
     ugenes <- unique(genes)
@@ -327,7 +329,14 @@ lazyRangesListCoverage <- function(mask,preCov,chrs,rc=NULL) {
     covs <- cmclapply(ugenes,function(x,covs) {
         return(Reduce("c",covs[names(covs)==x]))
     },covs,rc=rc)
+    #! Inversion of minus strand MUST take place at this stage... Inversing
+    #! exon coverage prior to merging was a mistake...
     names(covs) <- ugenes
+    mask <- mask[ugenes]
+    strands <- as.character(unlist(runValue(strand(mask))))
+    inv <- which(strands=="-")
+    if (length(inv) > 0)
+        covs[inv] <- lapply(covs[inv],rev)
     return(covs)
 }
 

@@ -13,12 +13,14 @@ Depends:
 Imports:
     BiocGenerics,
     biomaRt,
+    Biostrings,
     circlize,
     GenomeInfoDb,
     GenomicFeatures,
     graphics,
     grDevices,
     httr,
+    IRanges,
     methods,
     parallel,
     RSQLite,
@@ -58,8 +60,8 @@ biocViews: ImmunoOncology, Software, GeneExpression, Preprocessing,
 VignetteBuilder: knitr
 Authors@R: c(person(given="Panagiotis", family="Moulos",
     email="moulos@fleming.gr", role=c("aut", "cre")))
-Version: 1.19.1
-Date: 2020-11-19
+Version: 1.19.12
+Date: 2020-12-01
 Collate:
     'annotation.R'
     'argcheck.R'

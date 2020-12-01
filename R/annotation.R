@@ -768,11 +768,11 @@ importCustomAnnotation <- function(gtfFile,metadata,
     # obj can be an already opened connection or the db file or missing. In the
     # latter case, the function looks at the package filesystem location
     if (is.null(obj)) {
-        db <- file.path(system.file(package="metaseqR"),"annotation.sqlite")
+        db <- file.path(system.file(package="recoup"),"annotation.sqlite")
         drv <- dbDriver("SQLite")
         con <- tryCatch(dbConnect(drv,dbname=db),error=function(e) {
             message("Caught error: ",e)
-            stop("Have you constructed the metaseqR annotation database?")
+            stop("Have you constructed the recoup annotation database?")
         },finally="")
     }
     if (file.exists(obj)) {
@@ -784,6 +784,8 @@ importCustomAnnotation <- function(gtfFile,metadata,
     }
     else if (is(obj,"SQLiteConnection"))
         con <- obj
+    else
+        stop("Have you constructed the recoup annotation database?")
     return(con)
 }
 
@@ -1143,7 +1145,7 @@ getUcscAnnotation <- function(org,type,refdb="ucsc",chunkSize=500,rc=NULL) {
         stop("R package RSQLite is required to use annotation from UCSC!")
     
     if (org=="tair10") {
-        warnwrap("Arabidopsis thaliana genome is not supported by UCSC Genome ",
+        warning("Arabidopsis thaliana genome is not supported by UCSC Genome ",
             "Browser database! Switching to Ensembl...")
         return(getEnsemblAnnotation("tair10",type))
     }
@@ -1420,9 +1422,9 @@ getGcContent <- function(ann,org) {
 }
 
 getSeqInfo <- function(org,asSeqinfo=FALSE) {
-    sf <- tryCatch(GenomeInfoDb::fetchExtendedChromInfoFromUCSC(
+    sf <- tryCatch(GenomeInfoDb::getChromInfoFromUCSC(
         getUcscOrganism(org)),error=function(e) {
-            message("GenomeInfoDb::fetchExtendedChromInfoFromUCSC ",
+            message("GenomeInfoDb::getChromInfoFromUCSC ",
                 "failed with the following error: ")
             message(e)
             message("")

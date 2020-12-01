@@ -216,10 +216,11 @@ recoup <- function(
     # If type is rnaseq, the only allowed genomes are the ones supported by
     # recoup for the time being. In the future, a custom RNA-Seq genome may be
     # constructed from a GFF or like...
-    if (type=="rnaseq" && !.userOrg(genome,localDb)
-        && !(genome %in% getSupportedOrganisms()))
-        stop("When type is \"rnaseq\", only the supported genomes are allowed!")
-    
+    if (type=="rnaseq" && is.character(localDb) && file.exists(localDb) 
+        && !.userOrg(genome,localDb) && !(genome %in% getSupportedOrganisms()))
+        stop("When type is \"rnaseq\", only the supported or user imported ",
+            "genomes are allowed!")
+
     # annotation must be a list to be fed to buildCustomAnnotation
     if (is.list(genome) && !is.data.frame(genome)) {
         # members are checked by buildCustomAnnotation if required
