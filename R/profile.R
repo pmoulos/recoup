@@ -14,10 +14,22 @@ profileMatrix <- function(input,flank,binParams,rc=NULL,.feNoSplit=FALSE) {
 profileMatrixSample <- function(x,flank,binParams,haveEqualLengths,rc=NULL,
     .feNoSplit) {
     if (.feNoSplit) {
-        if (binParams$regionBinSize!=0)
-            prof <- binCoverageMatrix(x,binSize=binParams$regionBinSize,
-                where="locus",stat=binParams$sumStat,chunks=binParams$chunks,
-                rc=rc)
+        if (binParams$regionBinSize!=0) {
+            if (binParams$flankBinSize!=0) {
+                r <- flank/sum(flank)
+                leftPad <- ifelse(flank[1]==0,0,
+                    round(2*binParams$flankBinSize*r[1]))
+                rightPad <- ifelse(flank[2]==0,0,
+                    round(2*binParams$flankBinSize*r[2]))
+            }
+            else # Force a large bin in this case to save resolution
+                leftPad <- rightPad <- 50
+            prof <- binCoverageMatrix(
+                x,binSize=binParams$regionBinSize+leftPad+rightPad,
+                stat=binParams$sumStat,interpolation=binParams$interpolation,
+                flank=flank,where="locus",chunks=binParams$chunks,rc=rc
+            )
+        }
         else
             prof <- baseCoverageMatrix(x,chunks=binParams$chunks,rc=rc)
         return(prof)
@@ -205,8 +217,8 @@ imputeZero <- function(input) {
 #            miss <- which(is.na(input[[n]]$profile),arr.ind=TRUE)
 #            for (r in seq_len(nrow(miss))) {
 #                input[[n]]$profile[miss[r,1],miss[r,2]] <- 0
-#                    #mean(input[[n]]$profile[miss[r,1],c(miss[r,2]-2,miss[r,2]-1,
-#                    #    miss[r,2]+1,miss[r,2]+2)])
+#                    #mean(input[[n]]$profile[miss[r,1],c(miss[r,2]-2,
+#                       miss[r,2]-1,miss[r,2]+1,miss[r,2]+2)])
 #            }
 #        }
 #        else if (method == "knn") {

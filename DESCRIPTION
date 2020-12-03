@@ -60,8 +60,8 @@ biocViews: ImmunoOncology, Software, GeneExpression, Preprocessing,
 VignetteBuilder: knitr
 Authors@R: c(person(given="Panagiotis", family="Moulos",
     email="moulos@fleming.gr", role=c("aut", "cre")))
-Version: 1.19.12
-Date: 2020-12-01
+Version: 1.19.13
+Date: 2020-12-03
 Collate:
     'annotation.R'
     'argcheck.R'

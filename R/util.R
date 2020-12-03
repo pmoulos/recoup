@@ -561,10 +561,18 @@ mergeRuns <- function(...,withDesign=c("auto","drop"),dropPlots=TRUE) {
 decideChanges <- function(input,currCall,prevCall) {
     if (is.null(prevCall))
         return(input)
-    # Check region and flank
-    if (currCall$region != prevCall$region 
-        || !all(currCall$flank == prevCall$flank))
-        input <- removeData(input,c("coverage","profile"))
+    # Check genome, refdb, version, region and type
+    # reference goes away only if genome, refdb, version, region, type changes
+    # If those basics are changed, everything goes away
+    if (currCall$genome != prevCall$genome 
+        || currCall$refdb != prevCall$refdb 
+        || currCall$version != prevCall$version 
+        || currCall$type != prevCall$type 
+        || currCall$region != prevCall$region)
+        input <- removeData(input,c("ranges","coverage","profile","reference"))
+    # If only flank changes, no need to remove reference
+    if (!all(currCall$flank == prevCall$flank))
+        input <- removeData(input,c("ranges","coverage","profile"))
     # Check binParams
     if (currCall$binParams$flankBinSize != prevCall$binParams$flankBinSize
         || currCall$binParams$regionBinSize != prevCall$binParams$regionBinSize
@@ -575,9 +583,17 @@ decideChanges <- function(input,currCall,prevCall) {
         || currCall$binParams$forcedBinSize != prevCall$binParams$forcedBinSize
         || currCall$binParams$chunking != prevCall$binParams$chunking)
         input <- removeData(input,"profile")
+    # If normalization changes to linear from none, no need to remove coverage
     if (currCall$preprocessParams$normalize != 
-        prevCall$preprocessParams$normalize
-        || currCall$preprocessParams$sampleTo != 
+        prevCall$preprocessParams$normalize) {
+            if (currCall$preprocessParams$normalize == "linear" 
+                && prevCall$preprocessParams$normalize == "none")
+                input <- removeData(input,"profile")
+            else
+                input <- removeData(input,c("ranges","coverage","profile"))
+    }
+    # Check other preprocessParams
+    if (currCall$preprocessParams$sampleTo != 
         prevCall$preprocessParams$sampleTo
         || currCall$preprocessParams$spliceAction != 
         prevCall$preprocessParams$spliceAction
@@ -585,15 +601,21 @@ decideChanges <- function(input,currCall,prevCall) {
         prevCall$preprocessParams$spliceRemoveQ
         || currCall$preprocessParams$spliceRemoveQ != 
         prevCall$preprocessParams$spliceRemoveQ)
-        #|| currCall$preprocessParams$seed != prevCall$preprocessParams$seed)
         input <- removeData(input,c("ranges","coverage","profile"))
         
         return(input)
 }
 
-removeData <- function(input,type=c("ranges","coverage","profile")) {
+removeData <- function(input,type=c("ranges","coverage","profile",
+    "reference")) {
     type <- tolower(type)
-    checkTextArgs("type",type,c("ranges","coverage","profile"),multiarg=TRUE)
+    checkTextArgs("type",type,c("ranges","coverage","profile","reference"),
+        multiarg=TRUE)
+    if ("reference" %in% type) {
+        if (!is.null(input$data)) # Run at least once else nothing to remove
+            input["refRanges"] <- NULL
+        type <- type[-which(type=="reference")]
+    }
     if (!is.null(input$data)) # Gave recoup output object
         for (i in seq_len(length(input$data)))
             input$data[[i]][type] <- NULL

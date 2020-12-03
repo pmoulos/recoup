@@ -828,7 +828,10 @@ variableRangedBinSizes <- function(i,w,n) {
     subSf <- Seqinfo(seqnames=chrs,seqlengths=lens,isCircular=circ,genome=gen)
     
     # Do the actual subsetting
-    subGr <- gr[seqnames(gr) %in% chrs]
+    subGr <- tryCatch(gr[seqnames(gr) %in% chrs],error=function(e) {
+		ii <- BiocGenerics::match(seqnames(gr),chrs,nomatch=0) > 0
+		return(gr[ii])
+	},finally="")
     seqlevels(subGr) <- seqlevels(subSf)
     seqinfo(subGr) <- subSf
     if (is(gr,"GRangesList")) {

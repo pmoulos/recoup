@@ -3,14 +3,14 @@
 \title{Remove data from recoup list object}
 \usage{
     removeData(input, type = c("ranges", "coverage", 
-        "profile"))
+        "profile", "reference"))
 }
 \arguments{
     \item{input}{a list object created from 
     \code{\link{recoup}} or its \code{data} member.}
 
     \item{type}{one of \code{"ranges"}, \code{"coverage"},
-    \code{"profile"}.}
+    \code{"profile"}, \code{"reference"}.}
 }
 \value{
     A list which is normally the output of 
@@ -41,7 +41,11 @@
     This is required again when the normalization method 
     changes. \code{"profile"} removes the profile matrices
     derived from coverages. This is required for example 
-    when the \code{binParams} main argument changes.
+    when the \code{binParams} main argument changes. Finally,
+    \code{"reference"} removes the genomic loci over which
+    the calculations are taking place. This is required when
+    the \code{genome}, \code{refdb} or \code{version} main
+    arguments change.
 }
 \examples{
 # Load some data
