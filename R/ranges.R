@@ -169,8 +169,8 @@ getMainRanges <- function(genomeRanges,helperRanges=NULL,type,region,flank,
     else if (type=="rnaseq") {
         suppressWarnings(bamRanges <- 
             getRegionalRanges(helperRanges,region,flank))
-        if (any(start(bamRanges) < 1) || which(end(bamRanges)>seqlengths(
-            bamRanges)[as.character(seqnames(bamRanges))])) {
+        if (any(start(bamRanges) < 1) || end(bamRanges)>seqlengths(
+            bamRanges)[as.character(seqnames(bamRanges))]) {
             offB <- TRUE
             bamRanges <- .dropOrTrimGR(bamRanges,onFlankFail)
             # mainRanges will be offended as well
