@@ -1,5 +1,8 @@
 <!-- badges: start -->
-  [![Travis build status](https://travis-ci.org/pmoulos/recoup.svg?branch=master)](https://travis-ci.org/pmoulos/recoup)
+  ![Bioconductor build](http://www.bioconductor.org/shields/build/devel/bioc/recoup.svg)
+  ![Bioconductor platforms](http://www.bioconductor.org/shields/availability/3.12/recoup.svg)
+  ![Bioconductor dependencies](http://www.bioconductor.org/shields/dependencies/devel/recoup.svg)
+  </br>
   ![GitHub](https://img.shields.io/github/license/pmoulos/recoup)
   ![GitHub repo size](https://img.shields.io/github/repo-size/pmoulos/recoup)
   ![GitHub issues](https://img.shields.io/github/issues/pmoulos/recoup)
@@ -252,4 +255,11 @@ test <- recoup(
     rc=0.5
 )
 ```
+
+## 5. Citing recoup
+
+recoup was published in 
+[BMC Bioinformatics](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-020-03902-x). If you use it in your work, please cite:
+
+> Panagiotis Moulos: **recoup: flexible and versatile signal visualization from next generation sequencing**, *BMC Bioinformatics*, 22:2, 2021.
 
