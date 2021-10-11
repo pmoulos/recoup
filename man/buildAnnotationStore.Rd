@@ -47,7 +47,7 @@
 }
 \examples{
 \donttest{
-    buildAnnotationStore("mm9","ensembl")
+    buildAnnotationStore("mm10","ensembl")
 }
 }
 \author{
