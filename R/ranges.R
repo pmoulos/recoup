@@ -409,7 +409,7 @@ readBed <- function(bed,bg) {
         stop("R package GenomeInfoDb is required to retrieve chromosome ",
             "lengths when importing reads in bed files!")
     bed <- trim(import.bed(bed,trackLine=FALSE))
-    sf <- GenomeInfoDb::fetchExtendedChromInfoFromUCSC(getUcscOrganism(bg))
+    sf <- GenomeInfoDb::getChromInfoFromUCSC(getUcscOrganism(bg))
     rownames(sf) <- as.character(sf[,1])
     sf <- sf[seqlevels(bed),]
     sf <- Seqinfo(seqnames=sf[,1],seqlengths=sf[,2],
@@ -829,9 +829,9 @@ variableRangedBinSizes <- function(i,w,n) {
     
     # Do the actual subsetting
     subGr <- tryCatch(gr[seqnames(gr) %in% chrs],error=function(e) {
-		ii <- BiocGenerics::match(seqnames(gr),chrs,nomatch=0) > 0
-		return(gr[ii])
-	},finally="")
+        ii <- BiocGenerics::match(seqnames(gr),chrs,nomatch=0) > 0
+        return(gr[ii])
+    },finally="")
     seqlevels(subGr) <- seqlevels(subSf)
     seqinfo(subGr) <- subSf
     if (is(gr,"GRangesList")) {
