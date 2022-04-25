@@ -121,7 +121,8 @@ recoupProfile <- function(recoupObj,samples=NULL,rc=NULL) {
     
     # Create the x-axis breaks and labels
     width <- ncol(input[[1]]$profile)
-    lb <- makeHorizontalAnnotation(width,opts,"profile")
+    #lb <- makeHorizontalAnnotation(width,opts,"profile")
+    lb <- recoup:::makeHorizontalAnnotation(width,opts,"profile")
     breaks <- lb$breaks
     labels <- lb$labels
     
@@ -478,7 +479,8 @@ recoupHeatmap <- function(recoupObj,samples=NULL,rc=NULL) {
     
     width <- ncol(input[[1]]$profile)
     labCol <- rep("",width)
-    lb <- makeHorizontalAnnotation(width,opts,"heatmap")
+    #lb <- makeHorizontalAnnotation(width,opts,"heatmap")
+    lb <- recoup:::makeHorizontalAnnotation(width,opts,"heatmap")
     labCol[round(lb$breaks)] <- lb$labels
     
     # Filter the profiles here
@@ -504,7 +506,8 @@ recoupHeatmap <- function(recoupObj,samples=NULL,rc=NULL) {
     haCol <- HeatmapAnnotation(locus=function(index) {
         width <- ncol(input[[1]]$profile)
         labCol <- rep("",width)
-        lb <- makeHorizontalAnnotation(width,opts,"heatmap")
+        #lb <- makeHorizontalAnnotation(width,opts,"heatmap")
+        lb <- recoup:::makeHorizontalAnnotation(width,opts,"heatmap")
         labCol[round(lb$breaks)] <- lb$labels
         grid.text(labCol,(seq_len(width))/width,1,vjust=1,
             gp=grid::gpar(cex=0.7))
