@@ -116,7 +116,7 @@ For a more complete test dataset (a small one) have a look and download from
 In order to run smoothly the rest of the examples in these vignettes and produce
 some realistic results, you need to download a set of example BAM files, genomic
 regions and design files from 
-[here](https://drive.google.com/file/d/0BxxrqIl3Nb0NSVNqdGNPa3M3cnc/view?usp=sharing). 
+[here](https://drive.google.com/file/d/0BxxrqIl3Nb0NSVNqdGNPa3M3cnc/view?usp=sharing&resourcekey=0-msr8KXUniQ4dHK8aSSGxgQ). 
 Following, a description of each file in the archive (the tissue is always 
 liver):
 
