@@ -29,6 +29,7 @@ Imports:
     S4Vectors,
     stats,
     stringr,
+    txdbmaker,
     utils
 Suggests:
     grid,
