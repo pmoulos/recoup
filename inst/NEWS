@@ -131,3 +131,12 @@ NEW FEATURES
 BUG FIXES
     o Fixed bug resulting in running the same operation multiple times when
     chunking was requested.
+
+CHANGES IN VERSION 1.31.1 (2023-03-14)
+-------------------------------------
+
+NEW FEATURES
+
+    o No new features.
+BUG FIXES
+    o Switched to txdbmaker.

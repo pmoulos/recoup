@@ -2220,7 +2220,7 @@ importCustomGtf <- function(gtfFile,type=c("gene","exon","utr")) {
     desiredColumns <- c("type","gene_id","transcript_id","exon_id",
         "gene_name","gene_biotype")
     gr <- import(gtfFile,format="gtf",colnames=desiredColumns,
-        feature.type=GenomicFeatures:::GFF_FEATURE_TYPES)
+        feature.type=txdbmaker:::GFF_FEATURE_TYPES)
     grdf <- as.data.frame(gr)
     grdf <- grdf[grdf$type=="exon",]
 
@@ -2255,10 +2255,10 @@ parseCustomGtf <- function(gtfFile) {
     desiredColumns <- c("type","gene_id","transcript_id","exon_id",
         "gene_name","gene_biotype")
     #gr <- import(gtfFile,format="gtf",colnames=desiredColumns,
-    #    feature.type=GenomicFeatures:::GFF_FEATURE_TYPES)
+    #    feature.type=txdbmaker:::GFF_FEATURE_TYPES)
     ## Let it recognize automatically GFF/GTF
     gr <- import(gtfFile,colnames=desiredColumns,
-        feature.type=GenomicFeatures:::GFF_FEATURE_TYPES)
+        feature.type=txdbmaker:::GFF_FEATURE_TYPES)
     grdf <- as.data.frame(gr)
     grdf <- grdf[grdf$type=="exon",]
 
